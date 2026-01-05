@@ -18,10 +18,12 @@ struct ItemRef{
     borrow_count:usize,
     item:Box<dyn ContextItem>,
 }
+#[derive(Debug)]
 pub struct ContextRef<T:ContextItem>{
     pub item:&'static T,
     pub key:String
 }
+#[derive(Debug)]
 pub struct ContextMut<T:ContextItem>{
     pub item:&'static mut T,
     pub key:String
@@ -81,7 +83,7 @@ impl Default for Context {
 
 impl Context{
     pub fn new()->Self{
-        todo!()
+        Self { items: UnsafeCell::new(HashMap::new()) }
     } 
     unsafe fn drop_ref(&self, name:String){
         unsafe{
@@ -97,16 +99,16 @@ impl Context{
             }
         }
     }
-    pub fn add<T:ContextItem>(&self, name:String, item:T){
+    pub fn add<T:ContextItem, U:Into<String>>(&self, name:U, item:T){
         unsafe{
             let it = Box::new(ItemRef{mutably_borrowed:false, borrow_count:0,item: Box::new(item)});
-            self.items.get().as_mut().unwrap().insert(name, it);
+            self.items.get().as_mut().unwrap().insert(name.into(), it);
         }
     }
     pub fn get<T:ContextItem>(&self, name:&str)->Result<ContextRef<T>,()>{
         unsafe{
             let Some(t) = self.items.get().as_mut().unwrap().get_mut(name)else {
-                todo!()
+                return Err(());
             };
             if t.mutably_borrowed{
                 return Err(());
@@ -123,7 +125,7 @@ impl Context{
     pub fn get_mut<T:ContextItem>(&self, name:&str)->Result<ContextMut<T>,()>{
         unsafe{
             let Some(t) = self.items.get().as_mut().unwrap().get_mut(name)else {
-                todo!()
+                return Err(());
             };
             if t.mutably_borrowed{
                 return Err(());
@@ -156,5 +158,36 @@ impl Context{
     }
 }
 
-
-
+#[test]
+fn basics(){
+    context().add("i32", 0);
+    let mut a:ContextMut<i32> = context().get_mut("i32").unwrap();
+    *a+=1;
+    drop(a);
+    let b:ContextRef<i32> = context().get("i32").unwrap();
+    assert!(*b == 1);
+    drop(b);
+    context().remove("i32").unwrap();
+}
+#[test]
+fn threads(){
+    context().add("i32", 0);
+    let handle = std::thread::spawn(||{
+        _ = context().get::<i32>("i32").expect_err("should not exist");
+    });
+    handle.join().unwrap();
+}
+#[test]
+fn borrowing(){
+    context().add("i32", 0);
+    {
+    
+        let _a:ContextRef<i32> = context().get("i32").unwrap(); 
+        let _b:ContextRef<i32> = context().get("i32").unwrap();
+        let _ = context().get_mut::<i32>("i32").expect_err("should not be allowed to read");  
+    }
+    {
+        let _x= context().get_mut::<i32>("i32").unwrap();
+        let _ = context().get_mut::<i32>("i32").unwrap();
+    }
+}
