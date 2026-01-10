@@ -640,25 +640,32 @@ impl IdAllocator {
     pub fn alloc_target(&self) -> TargetId {
         self.al.lock().unwrap().alloc_target()
     }
+
     pub fn alloc_source(&self) -> SourceId {
         self.al.lock().unwrap().alloc_source()
     }
+
     pub fn alloc_general(&self) -> u64 {
         self.al.lock().unwrap().alloc_general()
     }
+
     pub fn free_target(&self, id: TargetId) {
         self.al.lock().unwrap().free_target(id)
     }
+
     pub fn free_source(&self, id: SourceId) {
         self.al.lock().unwrap().free_source(id)
     }
+
     pub fn free_general(&self, id: u64) {
         self.al.lock().unwrap().free_general(id)
     }
 }
+
 pub static IDS: IdAllocator = IdAllocator {
     al: Mutex::new(IdAllocatorInternal::new()),
 };
+
 struct IdAllocatorInternal {
     target_ids: BTreeSet<u64>,
     source_ids: BTreeSet<u64>,
@@ -672,6 +679,7 @@ impl IdAllocatorInternal {
             target_ids: BTreeSet::new(),
         }
     }
+
     pub fn alloc_source(&mut self) -> SourceId {
         let mut min = 1;
         for i in 1..=u64::MAX {
@@ -686,6 +694,7 @@ impl IdAllocatorInternal {
         self.source_ids.insert(min);
         SourceId { inner: min }
     }
+
     pub fn alloc_target(&mut self) -> TargetId {
         let mut min = 1;
         for i in 1..=u64::MAX {
@@ -700,6 +709,7 @@ impl IdAllocatorInternal {
         self.target_ids.insert(min);
         TargetId { inner: min }
     }
+
     pub fn alloc_general(&mut self) -> u64 {
         let mut min = 1;
         for i in 1..=u64::MAX {
@@ -714,12 +724,15 @@ impl IdAllocatorInternal {
         self.general_ids.insert(min);
         min
     }
+
     pub fn free_source(&mut self, id: SourceId) {
         self.source_ids.remove(&id.inner);
     }
+
     pub fn free_target(&mut self, id: TargetId) {
         self.target_ids.remove(&id.inner);
     }
+
     pub fn free_general(&mut self, id: u64) {
         self.general_ids.remove(&id);
     }
