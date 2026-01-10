@@ -1,10 +1,45 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
+use std::net::TcpStream;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+
+#[allow(unused)]
+pub type KeyCode = char;
+
+#[allow(unused)]
+#[derive(Clone, Copy)]
+pub enum MouseInput {
+    LeftClick {
+        x: i32,
+        y: i32,
+        is_currently_down: bool,
+    },
+    RightClick {
+        x: i32,
+        y: i32,
+        is_currently_down: bool,
+    },
+    MiddleClick {
+        x: i32,
+        y: i32,
+        is_currently_down: bool,
+    },
+    Move {
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+        is_left_down: bool,
+        is_right_down: bool,
+        is_middle_down: bool,
+    },
+}
+
+#[allow(unused)]
 #[derive(Clone, Copy)]
 pub struct SubId {
     inner: u64,
@@ -13,7 +48,12 @@ impl SubId {
     pub fn invalid() -> Self {
         Self { inner: 0 }
     }
+    pub fn is_valid(&self) -> bool {
+        self.inner != 0
+    }
 }
+
+#[allow(unused)]
 #[derive(Clone, Copy)]
 pub struct ServiceId {
     inner: u64,
@@ -22,24 +62,65 @@ impl ServiceId {
     pub fn invalid() -> Self {
         Self { inner: 0 }
     }
+    pub fn is_valid(&self) -> bool {
+        self.inner != 0
+    }
 }
+
+#[allow(unused)]
 #[derive(Clone, Copy)]
-pub struct ReaderId {
+pub struct SourceId {
     inner: u64,
 }
-impl ReaderId {
+impl SourceId {
     pub fn invalid() -> Self {
         Self { inner: 0 }
     }
+    pub fn is_valid(&self) -> bool {
+        self.inner != 0
+    }
 }
+
+#[allow(unused)]
+#[derive(Clone, Copy)]
+pub struct TargetId {
+    inner: u64,
+}
+impl TargetId {
+    pub fn invalid() -> Self {
+        Self { inner: 0 }
+    }
+    pub fn is_valid(&self) -> bool {
+        self.inner != 0
+    }
+}
+
 pub trait ThreadSafeIsh: Send + Sync + 'static {}
 impl<T: Send + Sync + 'static> ThreadSafeIsh for T {}
+
 pub enum Event<T: ThreadSafeIsh> {
     CreateSubscriber(Box<dyn EventSub<T>>),
-    DestroySubscriber { id: SubId },
+    DestroySubscriber {
+        id: SubId,
+    },
     CreateService(Box<dyn Service<T>>),
-    DestroyService { id: ServiceId },
-    TryRead { reader_id: ReaderId },
+    DestroyService {
+        id: ServiceId,
+    },
+    KeyBoardInput {
+        key_code: KeyCode,
+    },
+    MouseInput {
+        input_mouse_input: MouseInput,
+    },
+    TcpConnection {
+        stream: TcpStream,
+    },
+    ExternalInput {
+        source_id: SourceId,
+        target_id: TargetId,
+        input: Box<[u8]>,
+    },
     UserDefined(T),
 }
 impl<T: Clone + ThreadSafeIsh> Event<T> {
@@ -49,69 +130,102 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
             Event::DestroySubscriber { id: _ } => None,
             Event::CreateService(_) => None,
             Event::DestroyService { id: _ } => None,
+            Event::KeyBoardInput { key_code } => Some(Event::KeyBoardInput {
+                key_code: *key_code,
+            }),
+            Event::MouseInput { input_mouse_input } => Some(Event::MouseInput {
+                input_mouse_input: *input_mouse_input,
+            }),
+            Event::TcpConnection { stream: _ } => None,
+            Event::ExternalInput {
+                source_id,
+                target_id,
+                input,
+            } => Some(Event::ExternalInput {
+                source_id: *source_id,
+                target_id: *target_id,
+                input: input.clone(),
+            }),
             Event::UserDefined(t) => Some(Event::UserDefined(t.clone())),
-            _ => {
-                todo!()
-            }
         }
     }
+
     pub fn is_clonable(&self) -> bool {
         match self {
             Event::CreateSubscriber(_) => false,
             Event::DestroySubscriber { id: _ } => false,
             Event::CreateService(_) => false,
             Event::DestroyService { id: _ } => false,
+            Event::KeyBoardInput { key_code: _ } => true,
+            Event::MouseInput {
+                input_mouse_input: _,
+            } => true,
+            Event::TcpConnection { stream: _ } => false,
+            Event::ExternalInput {
+                source_id: _,
+                target_id: _,
+                input: _,
+            } => false,
             Event::UserDefined(_) => true,
-            _ => {
-                todo!()
-            }
         }
     }
 }
+
 pub enum EventRequest {
     None,
     Shared,
     Owned,
 }
+
 #[async_trait]
 pub trait EventSub<T: ThreadSafeIsh>: ThreadSafeIsh {
     async fn on_create(&mut self, self_id: SubId, sender: EventSync<T>);
+
     async fn wants_event(&self, event: &T) -> Result<EventRequest, Box<dyn Error>> {
         _ = event;
         Ok(EventRequest::None)
     }
+
     async fn wants_global_event(&self, event: &Event<T>) -> Result<EventRequest, Box<dyn Error>> {
         _ = event;
         Ok(EventRequest::None)
     }
+
     async fn on_event_owned(&mut self, event: T) -> Result<(), Box<dyn Error>> {
         _ = event;
         Ok(())
     }
+
     async fn on_event(&mut self, event: &T) -> Result<(), Box<dyn Error>>;
+
     async fn on_global_event<'a>(&'a self, event: &Event<T>) -> Result<(), Box<dyn Error>> {
         _ = event;
         Ok(())
     }
+
     async fn on_global_event_owned(&mut self, event: Event<T>) -> Result<(), Box<dyn Error>> {
         _ = event;
         Ok(())
     }
 }
+
 #[async_trait]
 pub trait Service<T: ThreadSafeIsh>: ThreadSafeIsh {
     async fn create(&mut self, id: ServiceId, sender: EventSync<T>);
     async fn update(&mut self) -> Result<(), Box<dyn Error>>;
 }
+
 struct Handler<T: ThreadSafeIsh> {
     subscribers: BTreeMap<u64, Box<dyn EventSub<T>>>,
     services: BTreeMap<u64, Box<dyn Service<T>>>,
     sender: Sender<Event<T>>,
 }
+
 pub struct EventHandler<T: ThreadSafeIsh> {
     pub channel: Receiver<Event<T>>,
     handler: Handler<T>,
 }
+
 impl<T: ThreadSafeIsh> Handler<T> {
     fn new(sender: Sender<Event<T>>) -> Self {
         Self {
@@ -120,6 +234,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
             services: BTreeMap::new(),
         }
     }
+
     pub async fn create_subscriber(
         &mut self,
         mut event_sub: Box<dyn EventSub<T>>,
@@ -141,9 +256,11 @@ impl<T: ThreadSafeIsh> Handler<T> {
             .await;
         self.subscribers.insert(min, event_sub);
     }
+
     pub async fn destroy_subscriber(&mut self, id: SubId) {
         self.subscribers.remove(&id.inner);
     }
+
     pub async fn create_service(
         &mut self,
         mut service: Box<dyn Service<T>>,
@@ -164,9 +281,11 @@ impl<T: ThreadSafeIsh> Handler<T> {
             .await;
         self.services.insert(min, service);
     }
+
     pub async fn destroy_service(&mut self, id: ServiceId) {
         self.services.remove(&id.inner);
     }
+
     pub async fn handle_user_event(&mut self, ev: T) -> Result<(), Box<dyn Error>> {
         for i in &mut self.subscribers {
             let v = i.1.wants_event(&ev).await?;
@@ -185,6 +304,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
         }
         Ok(())
     }
+
     pub async fn run_event(&mut self, i: Event<T>) -> Result<(), Box<dyn Error>> {
         match i {
             Event::CreateSubscriber(event_sub) => {
@@ -202,10 +322,14 @@ impl<T: ThreadSafeIsh> Handler<T> {
             Event::UserDefined(x) => {
                 self.handle_user_event(x).await?;
             }
+            _ => {
+                todo!()
+            }
         }
         Ok(())
     }
 }
+
 impl<T: ThreadSafeIsh> EventHandler<T> {
     pub fn new() -> (std::sync::mpsc::Sender<Event<T>>, Self) {
         let (sender, reciever) = std::sync::mpsc::channel();
@@ -217,6 +341,7 @@ impl<T: ThreadSafeIsh> EventHandler<T> {
             },
         )
     }
+
     pub async fn handle_events(&mut self) -> Result<(), Box<dyn Error>> {
         loop {
             let ev = self.channel.try_recv();
@@ -236,12 +361,14 @@ impl<T: ThreadSafeIsh> EventHandler<T> {
         }
         Ok(())
     }
+
     pub async fn handle_services(&mut self) -> Result<(), Box<dyn Error>> {
         for service in self.handler.services.values_mut() {
             service.as_mut().update().await?;
         }
         Ok(())
     }
+
     pub async fn run(&mut self, setup: impl AsyncFn(EventSync<T>)) {
         setup(EventSync::new(self.handler.sender.clone())).await;
         loop {
@@ -266,6 +393,7 @@ impl<T: ThreadSafeIsh> EventSync<T> {
             sender: Some(sender),
         }
     }
+
     pub fn new_event(&self, ev: T) -> Result<(), Box<dyn Error>> {
         self.sender
             .as_ref()
@@ -274,6 +402,7 @@ impl<T: ThreadSafeIsh> EventSync<T> {
             .unwrap();
         Ok(())
     }
+
     pub async fn create_new_subscriber<Sub: EventSub<T> + 'static>(
         &self,
         subscriber: Sub,
@@ -285,6 +414,7 @@ impl<T: ThreadSafeIsh> EventSync<T> {
             .send(Event::CreateSubscriber(bx))?;
         Ok(())
     }
+
     pub fn invalid() -> Self {
         Self { sender: None }
     }
@@ -312,6 +442,7 @@ impl<T> BPipe<T> {
         };
         (out1, out2)
     }
+
     pub fn send(&self, v: T) -> Result<(), Box<dyn Error>> {
         if self.done.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("done".into());
@@ -320,6 +451,7 @@ impl<T> BPipe<T> {
         sending.push_back(v);
         Ok(())
     }
+
     pub fn recieve(&self) -> Result<Option<T>, Box<dyn Error>> {
         if self.done.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("done".into());
@@ -327,6 +459,7 @@ impl<T> BPipe<T> {
         let mut recieving = self.recieving.lock().unwrap();
         Ok(recieving.pop_front())
     }
+
     pub fn recieve_wait(&self) -> Result<T, Box<dyn Error>> {
         loop {
             if self.done.load(std::sync::atomic::Ordering::Relaxed) {
@@ -338,6 +471,7 @@ impl<T> BPipe<T> {
             }
         }
     }
+
     pub fn recieve_async(&self) -> impl Future<Output = Result<T, Box<dyn Error>>> {
         pub struct Out<T> {
             reciever: Arc<Mutex<VecDeque<T>>>,
@@ -375,7 +509,6 @@ impl<T> BPipe<T> {
                 }
             }
         }
-
         Out {
             reciever: self.recieving.clone(),
             done: self.done.clone(),
@@ -387,6 +520,7 @@ impl<T> Drop for BPipe<T> {
         self.done.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
+
 pub struct EventForwarder<T: ThreadSafeIsh> {
     self_id: SubId,
     sender: EventSync<T>,
@@ -415,6 +549,7 @@ impl<T: ThreadSafeIsh + Clone> EventForwarder<T> {
         sync.create_new_subscriber(this).await.unwrap();
         out_pipe
     }
+
     pub async fn new_globals(
         should_forward: impl Fn(&Event<T>) -> bool + Send + Sync + 'static,
         sync: EventSync<T>,
@@ -434,6 +569,7 @@ impl<T: ThreadSafeIsh + Clone> EventForwarder<T> {
         sync.create_new_subscriber(this).await.unwrap();
         out_pipe
     }
+
     pub async fn new_all(
         should_forward: impl Fn(&T) -> bool + Send + Sync + 'static,
         should_forward_globals: impl Fn(&Event<T>) -> bool + Send + Sync + 'static,
@@ -460,9 +596,11 @@ impl<T: ThreadSafeIsh + Clone> EventSub<T> for EventForwarder<T> {
         self.self_id = self_id;
         self.sender = sender;
     }
+
     async fn on_event(&mut self, event: &T) -> Result<(), Box<dyn Error>> {
         self.pipe.as_ref().unwrap().send(event.clone())
     }
+
     async fn on_global_event<'a>(&'a self, event: &Event<T>) -> Result<(), Box<dyn Error>> {
         let Some(event) = event.try_clone() else {
             return Ok(());
@@ -470,6 +608,7 @@ impl<T: ThreadSafeIsh + Clone> EventSub<T> for EventForwarder<T> {
         self.event_pipe.as_ref().unwrap().send(event)?;
         Ok(())
     }
+
     async fn wants_global_event(&self, event: &Event<T>) -> Result<EventRequest, Box<dyn Error>> {
         if self.event_pipe.is_none() {
             return Ok(EventRequest::None);
@@ -484,6 +623,7 @@ impl<T: ThreadSafeIsh + Clone> EventSub<T> for EventForwarder<T> {
             Ok(EventRequest::None)
         }
     }
+
     async fn wants_event(&self, event: &T) -> Result<EventRequest, Box<dyn Error>> {
         if (self.should_forward)(event) {
             Ok(EventRequest::Shared)
@@ -493,3 +633,94 @@ impl<T: ThreadSafeIsh + Clone> EventSub<T> for EventForwarder<T> {
     }
 }
 
+pub struct IdAllocator {
+    al: Mutex<IdAllocatorInternal>,
+}
+impl IdAllocator {
+    pub fn alloc_target(&self) -> TargetId {
+        self.al.lock().unwrap().alloc_target()
+    }
+    pub fn alloc_source(&self) -> SourceId {
+        self.al.lock().unwrap().alloc_source()
+    }
+    pub fn alloc_general(&self) -> u64 {
+        self.al.lock().unwrap().alloc_general()
+    }
+    pub fn free_target(&self, id: TargetId) {
+        self.al.lock().unwrap().free_target(id)
+    }
+    pub fn free_source(&self, id: SourceId) {
+        self.al.lock().unwrap().free_source(id)
+    }
+    pub fn free_general(&self, id: u64) {
+        self.al.lock().unwrap().free_general(id)
+    }
+}
+pub static IDS: IdAllocator = IdAllocator {
+    al: Mutex::new(IdAllocatorInternal::new()),
+};
+struct IdAllocatorInternal {
+    target_ids: BTreeSet<u64>,
+    source_ids: BTreeSet<u64>,
+    general_ids: BTreeSet<u64>,
+}
+impl IdAllocatorInternal {
+    pub const fn new() -> Self {
+        Self {
+            general_ids: BTreeSet::new(),
+            source_ids: BTreeSet::new(),
+            target_ids: BTreeSet::new(),
+        }
+    }
+    pub fn alloc_source(&mut self) -> SourceId {
+        let mut min = 1;
+        for i in 1..=u64::MAX {
+            min = i;
+            if !self.source_ids.contains(&i) {
+                break;
+            }
+        }
+        if min == u64::MAX {
+            panic!()
+        }
+        self.source_ids.insert(min);
+        SourceId { inner: min }
+    }
+    pub fn alloc_target(&mut self) -> TargetId {
+        let mut min = 1;
+        for i in 1..=u64::MAX {
+            min = i;
+            if !self.target_ids.contains(&i) {
+                break;
+            }
+        }
+        if min == u64::MAX {
+            panic!()
+        }
+        self.target_ids.insert(min);
+        TargetId { inner: min }
+    }
+    pub fn alloc_general(&mut self) -> u64 {
+        let mut min = 1;
+        for i in 1..=u64::MAX {
+            min = i;
+            if !self.general_ids.contains(&i) {
+                break;
+            }
+        }
+        if min == u64::MAX {
+            panic!()
+        }
+        self.general_ids.insert(min);
+        min
+    }
+    pub fn free_source(&mut self, id: SourceId) {
+        self.source_ids.remove(&id.inner);
+    }
+    pub fn free_target(&mut self, id: TargetId) {
+        self.target_ids.remove(&id.inner);
+    }
+    pub fn free_general(&mut self, id: u64) {
+        self.general_ids.remove(&id);
+    }
+}
