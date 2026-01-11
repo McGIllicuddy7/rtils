@@ -122,6 +122,9 @@ pub enum Event<T: ThreadSafeIsh> {
         input: Box<[u8]>,
     },
     UserDefined(T),
+    RpcIo{
+        io:crate::rpc::RpcMessage,
+    }
 }
 impl<T: Clone + ThreadSafeIsh> Event<T> {
     pub fn try_clone(&self) -> Option<Event<T>> {
@@ -147,6 +150,7 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
                 input: input.clone(),
             }),
             Event::UserDefined(t) => Some(Event::UserDefined(t.clone())),
+            Event::RpcIo {  io:_}=>None,
         }
     }
 
@@ -167,6 +171,7 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
                 input: _,
             } => false,
             Event::UserDefined(_) => true,
+            Event::RpcIo { io:_ }=>false,
         }
     }
 }
@@ -215,9 +220,14 @@ pub trait Service<T: ThreadSafeIsh>: ThreadSafeIsh {
     async fn update(&mut self) -> Result<(), Box<dyn Error>>;
 }
 
+#[async_trait]
+pub trait Daemon<T:ThreadSafeIsh, >:ThreadSafeIsh{
+    async fn run();
+}
 struct Handler<T: ThreadSafeIsh> {
     subscribers: BTreeMap<u64, Box<dyn EventSub<T>>>,
     services: BTreeMap<u64, Box<dyn Service<T>>>,
+    daemons:BTreeMap<u64, Daemon>,
     sender: Sender<Event<T>>,
 }
 
@@ -399,6 +409,15 @@ impl<T: ThreadSafeIsh> EventSync<T> {
             .as_ref()
             .unwrap()
             .send(Event::UserDefined(ev))
+            .unwrap();
+        Ok(())
+    }
+
+    pub fn new_event_global(&self, ev:Event<T>) -> Result<(), Box<dyn Error>> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(ev)
             .unwrap();
         Ok(())
     }
