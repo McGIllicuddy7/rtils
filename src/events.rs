@@ -7,6 +7,31 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
+use crate::{Exception, Throw, Throws};
+#[macro_export]
+macro_rules! DEFINE_ID_WRAPPER {
+    ($name:ident) => {
+        #[allow(unused)]
+        #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
+        pub struct $name{
+            inner:u64,
+        }
+        impl $name{
+            pub fn invalid()->Self{
+                Self{inner:0}
+            }
+            pub fn inner(&self)->u64{
+                self.inner
+            }
+            pub fn alloc()->Self{
+                Self{inner:IDS.alloc_general()}
+            }
+            pub fn free(self){
+                IDS.free_general(self.inner)
+            }
+        }
+    };
+}
 #[allow(unused)]
 pub type KeyCode = char;
 
@@ -40,7 +65,7 @@ pub enum MouseInput {
 }
 
 #[allow(unused)]
-#[derive(Clone, Copy)]
+#[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub struct SubId {
     inner: u64,
 }
@@ -51,10 +76,13 @@ impl SubId {
     pub fn is_valid(&self) -> bool {
         self.inner != 0
     }
+    pub fn inner(&self)->u64{
+        self.inner
+    }
 }
 
 #[allow(unused)]
-#[derive(Clone, Copy)]
+#[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub struct ServiceId {
     inner: u64,
 }
@@ -65,39 +93,18 @@ impl ServiceId {
     pub fn is_valid(&self) -> bool {
         self.inner != 0
     }
-}
-
-#[allow(unused)]
-#[derive(Clone, Copy)]
-pub struct SourceId {
-    inner: u64,
-}
-impl SourceId {
-    pub fn invalid() -> Self {
-        Self { inner: 0 }
-    }
-    pub fn is_valid(&self) -> bool {
-        self.inner != 0
+    pub fn inner(&self)->u64{
+        self.inner
     }
 }
-
-#[allow(unused)]
-#[derive(Clone, Copy)]
-pub struct TargetId {
-    inner: u64,
-}
-impl TargetId {
-    pub fn invalid() -> Self {
-        Self { inner: 0 }
-    }
-    pub fn is_valid(&self) -> bool {
-        self.inner != 0
-    }
-}
+DEFINE_ID_WRAPPER!(SourceId);
+DEFINE_ID_WRAPPER!(TargetId);
 
 pub trait ThreadSafeIsh: Send + Sync + 'static {}
 impl<T: Send + Sync + 'static> ThreadSafeIsh for T {}
 
+pub trait ThreadSafeIshErr:Error+Send+Sync+'static{}
+impl<T: Error+Send + Sync + 'static> ThreadSafeIshErr for T {}
 pub enum Event<T: ThreadSafeIsh> {
     CreateSubscriber(Box<dyn EventSub<T>>),
     DestroySubscriber {
@@ -122,8 +129,8 @@ pub enum Event<T: ThreadSafeIsh> {
         input: Box<[u8]>,
     },
     UserDefined(T),
-    RpcIo{
-        io:crate::rpc::RpcMessage,
+    CreateDaemon{
+        daemon:Box<dyn Daemon>,
     }
 }
 impl<T: Clone + ThreadSafeIsh> Event<T> {
@@ -150,7 +157,7 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
                 input: input.clone(),
             }),
             Event::UserDefined(t) => Some(Event::UserDefined(t.clone())),
-            Event::RpcIo {  io:_}=>None,
+            Event::CreateDaemon { daemon:_ }=>None,
         }
     }
 
@@ -171,7 +178,7 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
                 input: _,
             } => false,
             Event::UserDefined(_) => true,
-            Event::RpcIo { io:_ }=>false,
+            Event::CreateDaemon { daemon:_ }=>false,
         }
     }
 }
@@ -186,29 +193,29 @@ pub enum EventRequest {
 pub trait EventSub<T: ThreadSafeIsh>: ThreadSafeIsh {
     async fn on_create(&mut self, self_id: SubId, sender: EventSync<T>);
 
-    async fn wants_event(&self, event: &T) -> Result<EventRequest, Box<dyn Error>> {
+    async fn wants_event(&self, event: &T) ->Throws<EventRequest> {
         _ = event;
         Ok(EventRequest::None)
     }
 
-    async fn wants_global_event(&self, event: &Event<T>) -> Result<EventRequest, Box<dyn Error>> {
+    async fn wants_global_event(&self, event: &Event<T>) -> Throws<EventRequest>{
         _ = event;
         Ok(EventRequest::None)
     }
 
-    async fn on_event_owned(&mut self, event: T) -> Result<(), Box<dyn Error>> {
+    async fn on_event_owned(&mut self, event: T) ->Throws<()> {
         _ = event;
         Ok(())
     }
 
-    async fn on_event(&mut self, event: &T) -> Result<(), Box<dyn Error>>;
+    async fn on_event(&mut self, event: &T) ->Throws<()>;
 
-    async fn on_global_event<'a>(&'a self, event: &Event<T>) -> Result<(), Box<dyn Error>> {
+    async fn on_global_event<'a>(&'a self, event: &Event<T>) -> Throws<()> {
         _ = event;
         Ok(())
     }
 
-    async fn on_global_event_owned(&mut self, event: Event<T>) -> Result<(), Box<dyn Error>> {
+    async fn on_global_event_owned(&mut self, event: Event<T>) -> Throws<()> {
         _ = event;
         Ok(())
     }
@@ -217,17 +224,16 @@ pub trait EventSub<T: ThreadSafeIsh>: ThreadSafeIsh {
 #[async_trait]
 pub trait Service<T: ThreadSafeIsh>: ThreadSafeIsh {
     async fn create(&mut self, id: ServiceId, sender: EventSync<T>);
-    async fn update(&mut self) -> Result<(), Box<dyn Error>>;
+    async fn update(&mut self) -> Throws<()>;
 }
 
 #[async_trait]
-pub trait Daemon<T:ThreadSafeIsh, >:ThreadSafeIsh{
-    async fn run();
+pub trait Daemon:ThreadSafeIsh{ 
+    async fn run(&mut self);
 }
 struct Handler<T: ThreadSafeIsh> {
-    subscribers: BTreeMap<u64, Box<dyn EventSub<T>>>,
-    services: BTreeMap<u64, Box<dyn Service<T>>>,
-    daemons:BTreeMap<u64, Daemon>,
+    subscribers: BTreeMap<SubId, Box<dyn EventSub<T>>>,
+    services: BTreeMap<ServiceId, Box<dyn Service<T>>>, 
     sender: Sender<Event<T>>,
 }
 
@@ -252,7 +258,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
     ) {
         let mut min = 0;
         for i in 0..=u64::MAX {
-            if !self.subscribers.contains_key(&i) {
+            if !self.subscribers.contains_key(&SubId { inner: i }) {
                 min = i;
                 break;
             }
@@ -264,11 +270,11 @@ impl<T: ThreadSafeIsh> Handler<T> {
             .as_mut()
             .on_create(SubId { inner: min }, EventSync::new(sender))
             .await;
-        self.subscribers.insert(min, event_sub);
+        self.subscribers.insert(SubId { inner: min }, event_sub);
     }
 
     pub async fn destroy_subscriber(&mut self, id: SubId) {
-        self.subscribers.remove(&id.inner);
+        self.subscribers.remove(&id);
     }
 
     pub async fn create_service(
@@ -278,7 +284,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
     ) {
         let mut min = 0;
         for i in 0..=u64::MAX {
-            if !self.services.contains_key(&i) {
+            if !self.services.contains_key(&ServiceId{inner:min}) {
                 min = i;
                 break;
             }
@@ -289,14 +295,14 @@ impl<T: ThreadSafeIsh> Handler<T> {
         service
             .create(ServiceId { inner: min }, EventSync::new(sender))
             .await;
-        self.services.insert(min, service);
+        self.services.insert(ServiceId { inner: min }, service);
     }
 
     pub async fn destroy_service(&mut self, id: ServiceId) {
-        self.services.remove(&id.inner);
+        self.services.remove(&id);
     }
 
-    pub async fn handle_user_event(&mut self, ev: T) -> Result<(), Box<dyn Error>> {
+    pub async fn handle_user_event(&mut self, ev: T) ->Throws<()> {
         for i in &mut self.subscribers {
             let v = i.1.wants_event(&ev).await?;
             match v {
@@ -315,7 +321,22 @@ impl<T: ThreadSafeIsh> Handler<T> {
         Ok(())
     }
 
-    pub async fn run_event(&mut self, i: Event<T>) -> Result<(), Box<dyn Error>> {
+    pub async fn run_event(&mut self, i: Event<T>) ->Throws<()> {
+        for (_, sub) in &mut self.subscribers{
+            match sub.as_ref().wants_global_event(&i).await?{
+                EventRequest::None=>{
+                    continue;
+                }
+                EventRequest::Shared=>{
+                    sub.as_mut().on_global_event(&i).await?;
+                }
+                EventRequest::Owned=>{
+                    sub.as_mut().on_global_event_owned(i).await?;
+                    return Ok(())
+                }
+
+            }
+        }
         match i {
             Event::CreateSubscriber(event_sub) => {
                 self.create_subscriber(event_sub, self.sender.clone()).await;
@@ -331,6 +352,11 @@ impl<T: ThreadSafeIsh> Handler<T> {
             }
             Event::UserDefined(x) => {
                 self.handle_user_event(x).await?;
+            }
+            Event::CreateDaemon { mut daemon }=>{
+                tokio::task::spawn(async move {
+                    daemon.run().await
+                });
             }
             _ => {
                 todo!()
@@ -352,7 +378,7 @@ impl<T: ThreadSafeIsh> EventHandler<T> {
         )
     }
 
-    pub async fn handle_events(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn handle_events(&mut self) -> Throws<()> {
         loop {
             let ev = self.channel.try_recv();
             match ev {
@@ -372,7 +398,7 @@ impl<T: ThreadSafeIsh> EventHandler<T> {
         Ok(())
     }
 
-    pub async fn handle_services(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn handle_services(&mut self) -> Throws<()> {
         for service in self.handler.services.values_mut() {
             service.as_mut().update().await?;
         }
@@ -394,8 +420,14 @@ impl<T: ThreadSafeIsh> EventHandler<T> {
     }
 }
 
+
 pub struct EventSync<T: ThreadSafeIsh> {
     sender: Option<Sender<Event<T>>>,
+}
+impl<T:ThreadSafeIsh> Clone for EventSync<T>{
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone() }
+    }
 }
 impl<T: ThreadSafeIsh> EventSync<T> {
     pub fn new(sender: Sender<Event<T>>) -> Self {
@@ -404,7 +436,7 @@ impl<T: ThreadSafeIsh> EventSync<T> {
         }
     }
 
-    pub fn new_event(&self, ev: T) -> Result<(), Box<dyn Error>> {
+    pub fn new_event(&self, ev: T) -> Throws<()>{
         self.sender
             .as_ref()
             .unwrap()
@@ -413,7 +445,7 @@ impl<T: ThreadSafeIsh> EventSync<T> {
         Ok(())
     }
 
-    pub fn new_event_global(&self, ev:Event<T>) -> Result<(), Box<dyn Error>> {
+    pub fn new_event_global(&self, ev:Event<T>) -> Throws<()> {
         self.sender
             .as_ref()
             .unwrap()
@@ -439,6 +471,7 @@ impl<T: ThreadSafeIsh> EventSync<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct BPipe<T> {
     sending: Arc<Mutex<VecDeque<T>>>,
     recieving: Arc<Mutex<VecDeque<T>>>,
@@ -462,7 +495,7 @@ impl<T> BPipe<T> {
         (out1, out2)
     }
 
-    pub fn send(&self, v: T) -> Result<(), Box<dyn Error>> {
+    pub fn send(&self, v: T) -> Throws<()> {
         if self.done.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("done".into());
         }
@@ -471,15 +504,15 @@ impl<T> BPipe<T> {
         Ok(())
     }
 
-    pub fn recieve(&self) -> Result<Option<T>, Box<dyn Error>> {
+    pub fn recieve(&self) -> Throws<Option<T>> {
         if self.done.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err("done".into());
+            todo!()
         }
         let mut recieving = self.recieving.lock().unwrap();
         Ok(recieving.pop_front())
     }
 
-    pub fn recieve_wait(&self) -> Result<T, Box<dyn Error>> {
+    pub fn recieve_wait(&self) -> Throws<T>{
         loop {
             if self.done.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("done".into());
@@ -491,19 +524,19 @@ impl<T> BPipe<T> {
         }
     }
 
-    pub fn recieve_async(&self) -> impl Future<Output = Result<T, Box<dyn Error>>> {
+    pub fn recieve_async(&self) -> impl Future<Output =Throws<T>> {
         pub struct Out<T> {
             reciever: Arc<Mutex<VecDeque<T>>>,
             done: Arc<AtomicBool>,
         }
         impl<T> Future for Out<T> {
-            type Output = Result<T, Box<dyn Error>>;
+            type Output = Throws<T>;
             fn poll(
                 self: std::pin::Pin<&mut Self>,
                 _cx: &mut std::task::Context<'_>,
             ) -> std::task::Poll<Self::Output> {
                 if self.done.load(std::sync::atomic::Ordering::Relaxed) {
-                    return std::task::Poll::Ready(Err("done".into()));
+                    return std::task::Poll::Ready(Err::<T,Exception>("done".into()));
                 }
                 let tmp = self.reciever.try_lock();
                 match tmp {
@@ -539,6 +572,7 @@ impl<T> Drop for BPipe<T> {
         self.done.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
+
 
 pub struct EventForwarder<T: ThreadSafeIsh> {
     self_id: SubId,
@@ -616,11 +650,11 @@ impl<T: ThreadSafeIsh + Clone> EventSub<T> for EventForwarder<T> {
         self.sender = sender;
     }
 
-    async fn on_event(&mut self, event: &T) -> Result<(), Box<dyn Error>> {
+    async fn on_event(&mut self, event: &T) -> Throws<()>{
         self.pipe.as_ref().unwrap().send(event.clone())
     }
 
-    async fn on_global_event<'a>(&'a self, event: &Event<T>) -> Result<(), Box<dyn Error>> {
+    async fn on_global_event<'a>(&'a self, event: &Event<T>) -> Throws<()> {
         let Some(event) = event.try_clone() else {
             return Ok(());
         };
@@ -628,7 +662,7 @@ impl<T: ThreadSafeIsh + Clone> EventSub<T> for EventForwarder<T> {
         Ok(())
     }
 
-    async fn wants_global_event(&self, event: &Event<T>) -> Result<EventRequest, Box<dyn Error>> {
+    async fn wants_global_event(&self, event: &Event<T>) -> Throws<EventRequest> {
         if self.event_pipe.is_none() {
             return Ok(EventRequest::None);
         }
@@ -643,7 +677,7 @@ impl<T: ThreadSafeIsh + Clone> EventSub<T> for EventForwarder<T> {
         }
     }
 
-    async fn wants_event(&self, event: &T) -> Result<EventRequest, Box<dyn Error>> {
+    async fn wants_event(&self, event: &T) -> Throws<EventRequest> {
         if (self.should_forward)(event) {
             Ok(EventRequest::Shared)
         } else {
@@ -656,24 +690,8 @@ pub struct IdAllocator {
     al: Mutex<IdAllocatorInternal>,
 }
 impl IdAllocator {
-    pub fn alloc_target(&self) -> TargetId {
-        self.al.lock().unwrap().alloc_target()
-    }
-
-    pub fn alloc_source(&self) -> SourceId {
-        self.al.lock().unwrap().alloc_source()
-    }
-
     pub fn alloc_general(&self) -> u64 {
         self.al.lock().unwrap().alloc_general()
-    }
-
-    pub fn free_target(&self, id: TargetId) {
-        self.al.lock().unwrap().free_target(id)
-    }
-
-    pub fn free_source(&self, id: SourceId) {
-        self.al.lock().unwrap().free_source(id)
     }
 
     pub fn free_general(&self, id: u64) {
@@ -686,47 +704,13 @@ pub static IDS: IdAllocator = IdAllocator {
 };
 
 struct IdAllocatorInternal {
-    target_ids: BTreeSet<u64>,
-    source_ids: BTreeSet<u64>,
     general_ids: BTreeSet<u64>,
 }
 impl IdAllocatorInternal {
     pub const fn new() -> Self {
         Self {
             general_ids: BTreeSet::new(),
-            source_ids: BTreeSet::new(),
-            target_ids: BTreeSet::new(),
         }
-    }
-
-    pub fn alloc_source(&mut self) -> SourceId {
-        let mut min = 1;
-        for i in 1..=u64::MAX {
-            min = i;
-            if !self.source_ids.contains(&i) {
-                break;
-            }
-        }
-        if min == u64::MAX {
-            panic!()
-        }
-        self.source_ids.insert(min);
-        SourceId { inner: min }
-    }
-
-    pub fn alloc_target(&mut self) -> TargetId {
-        let mut min = 1;
-        for i in 1..=u64::MAX {
-            min = i;
-            if !self.target_ids.contains(&i) {
-                break;
-            }
-        }
-        if min == u64::MAX {
-            panic!()
-        }
-        self.target_ids.insert(min);
-        TargetId { inner: min }
     }
 
     pub fn alloc_general(&mut self) -> u64 {
@@ -743,16 +727,102 @@ impl IdAllocatorInternal {
         self.general_ids.insert(min);
         min
     }
-
-    pub fn free_source(&mut self, id: SourceId) {
-        self.source_ids.remove(&id.inner);
-    }
-
-    pub fn free_target(&mut self, id: TargetId) {
-        self.target_ids.remove(&id.inner);
-    }
-
     pub fn free_general(&mut self, id: u64) {
         self.general_ids.remove(&id);
     }
+}
+
+pub struct WriteOnce<T>{
+    v:Arc<Mutex<Option<T>>>,
+}
+impl<T> WriteOnce<T>{
+    pub fn create()->(Self, Self){
+        let vout = Arc::new(Mutex::new(None));
+        let a = Self{v:vout.clone()};
+        let b = Self{v:vout};
+        (a,b)
+    }
+    pub fn read(&self)->impl Future<Output =Result<T, Box<dyn Error>>>{
+        struct Out<T>{
+            v:Arc<Mutex<Option<T>>>
+        }
+        impl<T> Future for Out<T>{
+            type Output = Result<T, Box<dyn Error>>;
+            fn poll(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+                let lock = self.v.try_lock();
+                match lock{
+                    Ok(mut t) => {
+                        if let Some(m) = t.take(){
+                            std::task::Poll::Ready(Ok(m))
+                        }else{
+                            std::task::Poll::Pending
+                        }
+               
+                    },
+                    Err(e) => {
+                        match e{
+                            std::sync::TryLockError::Poisoned(poison_error) =>{
+                                let mut lck = poison_error.into_inner();
+                                if let Some(m) = lck.take(){
+                                    std::task::Poll::Ready(Ok(m))
+                                }else{
+                                    std::task::Poll::Pending
+                                }
+                            }
+                            std::sync::TryLockError::WouldBlock => {
+                                std::task::Poll::Pending 
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let out = Out{
+            v:self.v.clone()
+        };
+        out
+    }
+
+    pub fn write(self, v:T){
+        let lock = self.v.lock();
+        let mut value = match lock{
+            Ok(value)=>{
+                value
+            }
+            Err(value)=>{
+                value.into_inner()
+            }
+        };
+        *value = Some(v);
+    }
+
+    pub fn try_read(&self)->Result<Option<T>, Box<dyn Error>>{
+              let lock = self.v.try_lock();
+                match lock{
+                    Ok(mut t) => {
+                        if let Some(m) = t.take(){
+                            Ok(Some(m))
+                        }else{
+                            Ok(None)
+                        }
+               
+                    },
+                    Err(e) => {
+                        match e{
+                            std::sync::TryLockError::Poisoned(poison_error) =>{
+                                let mut lck = poison_error.into_inner();
+                                if let Some(m) = lck.take(){
+                                    Ok(Some(m))
+                                }else{
+                                    Ok(None)
+                                }
+                            }
+                            std::sync::TryLockError::WouldBlock => {
+                                Ok(None)
+                            }
+                        }
+                    }
+                }
+    }
+
 }
