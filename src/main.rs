@@ -1,10 +1,11 @@
 use std::io::{Write, stdin, stdout};
 
-use rtils::{sscanf, dyn_scanf};
+use rtils::{dyn_scanf, events::EventHandler, server::file_server, sscanf};
 
 
- fn main(){
-
+#[tokio::main]
+ async fn main(){
+    file_server("serve_dir", "127.0.0.1:8080".to_string()).await;
 }
 #[allow(unused)]
 pub fn scanf_test(){

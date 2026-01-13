@@ -7,26 +7,29 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use crate::{Exception, Throw, Throws};
+#[allow(unused)]
+use crate::{Exception, Throw, Throws, server::HTTPRequest, server::HTTPResponse};
 #[macro_export]
 macro_rules! DEFINE_ID_WRAPPER {
     ($name:ident) => {
         #[allow(unused)]
         #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
-        pub struct $name{
-            inner:u64,
+        pub struct $name {
+            inner: u64,
         }
-        impl $name{
-            pub fn invalid()->Self{
-                Self{inner:0}
+        impl $name {
+            pub fn invalid() -> Self {
+                Self { inner: 0 }
             }
-            pub fn inner(&self)->u64{
+            pub fn inner(&self) -> u64 {
                 self.inner
             }
-            pub fn alloc()->Self{
-                Self{inner:IDS.alloc_general()}
+            pub fn alloc() -> Self {
+                Self {
+                    inner: IDS.alloc_general(),
+                }
             }
-            pub fn free(self){
+            pub fn free(self) {
                 IDS.free_general(self.inner)
             }
         }
@@ -76,7 +79,7 @@ impl SubId {
     pub fn is_valid(&self) -> bool {
         self.inner != 0
     }
-    pub fn inner(&self)->u64{
+    pub fn inner(&self) -> u64 {
         self.inner
     }
 }
@@ -93,18 +96,42 @@ impl ServiceId {
     pub fn is_valid(&self) -> bool {
         self.inner != 0
     }
-    pub fn inner(&self)->u64{
+    pub fn inner(&self) -> u64 {
         self.inner
     }
 }
-DEFINE_ID_WRAPPER!(SourceId);
-DEFINE_ID_WRAPPER!(TargetId);
-
+DEFINE_ID_WRAPPER!(TcpConnectionId);
+DEFINE_ID_WRAPPER!(DaemonId);
 pub trait ThreadSafeIsh: Send + Sync + 'static {}
 impl<T: Send + Sync + 'static> ThreadSafeIsh for T {}
 
-pub trait ThreadSafeIshErr:Error+Send+Sync+'static{}
-impl<T: Error+Send + Sync + 'static> ThreadSafeIshErr for T {}
+pub trait ThreadSafeIshErr: Error + Send + Sync + 'static {}
+impl<T: Error + Send + Sync + 'static> ThreadSafeIshErr for T {}
+#[derive(PartialEq, Clone, Hash, Debug)]
+pub enum EventType {
+    CreateSubscriber,
+    DestroySubscriber,
+    CreateService,
+    DestroyService,
+    KeyBoardInput,
+    MouseInput,
+    TcpConnection,
+    NotifyNewTcpConnection,
+    TcpDisconnect,
+    NetInput,
+    HttpRequest,
+    HttpResponse,
+    NetOutput,
+    UserDefined,
+    CreateDaemon,
+    RequestConnectionKill,
+    RequestDaemonKill,
+    RequestServiceKill,
+    RequestKill,
+    RequestSubscriberKill,
+    DaemonCreated,
+}
+
 pub enum Event<T: ThreadSafeIsh> {
     CreateSubscriber(Box<dyn EventSub<T>>),
     DestroySubscriber {
@@ -122,16 +149,53 @@ pub enum Event<T: ThreadSafeIsh> {
     },
     TcpConnection {
         stream: TcpStream,
+        id: TcpConnectionId,
     },
-    ExternalInput {
-        source_id: SourceId,
-        target_id: TargetId,
-        input: Box<[u8]>,
+    NotifyNewTcpConnection {
+        id: TcpConnectionId,
+    },
+    TcpDisconnect {
+        id: TcpConnectionId,
+    },
+    NetInput {
+        id: TcpConnectionId,
+        data: Arc<[u8]>,
+    },
+    HttpRequest {
+        id: TcpConnectionId,
+        request: HTTPRequest,
+    },
+    HttpResponse {
+        id: TcpConnectionId,
+        response: HTTPResponse,
+    },
+    NetOutput {
+        id: TcpConnectionId,
+        data: Arc<[u8]>,
     },
     UserDefined(T),
-    CreateDaemon{
-        daemon:Box<dyn Daemon>,
-    }
+    CreateDaemon {
+        daemon: Box<dyn Daemon>,
+        id: DaemonId,
+    },
+    DaemonCreated {
+        id: DaemonId,
+    },
+    RequestDaemonKill {
+        id: DaemonId,
+    },
+    RequestConnectionKill {
+        id: TcpConnectionId,
+    },
+    RequestSubscriberKill {
+        id: SubId,
+    },
+    RequestServiceKill {
+        id: ServiceId,
+    },
+    RequestKill {
+        id: u64,
+    },
 }
 impl<T: Clone + ThreadSafeIsh> Event<T> {
     pub fn try_clone(&self) -> Option<Event<T>> {
@@ -146,18 +210,33 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
             Event::MouseInput { input_mouse_input } => Some(Event::MouseInput {
                 input_mouse_input: *input_mouse_input,
             }),
-            Event::TcpConnection { stream: _ } => None,
-            Event::ExternalInput {
-                source_id,
-                target_id,
-                input,
-            } => Some(Event::ExternalInput {
-                source_id: *source_id,
-                target_id: *target_id,
-                input: input.clone(),
+            Event::TcpConnection { stream: _, id: _ } => None,
+            Event::NotifyNewTcpConnection { id } => Some(Event::NotifyNewTcpConnection { id: *id }),
+            Event::TcpDisconnect { id } => Some(Event::TcpDisconnect { id: *id }),
+            Event::HttpRequest { id, request } => Some(Event::HttpRequest {
+                id: *id,
+                request: request.clone(),
+            }),
+            Event::HttpResponse { id, response } => Some(Event::HttpResponse {
+                id: *id,
+                response: response.clone(),
+            }),
+            Event::NetOutput { id, data } => Some(Event::NetOutput {
+                id: *id,
+                data: data.clone(),
+            }),
+            Event::NetInput { id, data } => Some(Event::NetInput {
+                id: *id,
+                data: data.clone(),
             }),
             Event::UserDefined(t) => Some(Event::UserDefined(t.clone())),
-            Event::CreateDaemon { daemon:_ }=>None,
+            Event::CreateDaemon { daemon: _, id: _ } => None,
+            Event::RequestKill { id } => Some(Event::RequestKill { id: *id }),
+            Event::RequestConnectionKill { id } => Some(Event::RequestConnectionKill { id: *id }),
+            Event::RequestServiceKill { id } => Some(Event::RequestServiceKill { id: *id }),
+            Event::RequestSubscriberKill { id } => Some(Event::RequestSubscriberKill { id: *id }),
+            Event::RequestDaemonKill { id } => Some(Event::RequestDaemonKill { id: *id }),
+            Event::DaemonCreated { id } => Some(Event::DaemonCreated { id: *id }),
         }
     }
 
@@ -171,14 +250,50 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
             Event::MouseInput {
                 input_mouse_input: _,
             } => true,
-            Event::TcpConnection { stream: _ } => false,
-            Event::ExternalInput {
-                source_id: _,
-                target_id: _,
-                input: _,
-            } => false,
+            Event::TcpConnection { stream: _, id: _ } => false,
             Event::UserDefined(_) => true,
-            Event::CreateDaemon { daemon:_ }=>false,
+            Event::CreateDaemon { daemon: _, id: _ } => false,
+            Event::NotifyNewTcpConnection { id: _ } => true,
+            Event::TcpDisconnect { id: _ } => true,
+            Event::NetInput { id: _, data: _ } => true,
+            Event::NetOutput { id: _, data: _ } => true,
+            Event::HttpRequest { id: _, request: _ } => true,
+            Event::HttpResponse { id: _, response: _ } => true,
+            Event::RequestConnectionKill { id: _ } => true,
+            Event::RequestKill { id: _ } => true,
+            Event::RequestDaemonKill { id: _ } => true,
+            Event::RequestSubscriberKill { id: _ } => true,
+            Event::RequestServiceKill { id: _ } => true,
+            Event::DaemonCreated { id } => true,
+        }
+    }
+}
+impl<T:ThreadSafeIsh> Event<T>{
+        pub fn get_type(&self) -> EventType {
+        match self {
+            Event::CreateSubscriber(_) => EventType::CreateSubscriber,
+            Event::DestroySubscriber { id: _ } => EventType::DestroySubscriber,
+            Event::CreateService(_) => EventType::CreateService,
+            Event::DestroyService { id: _ } => EventType::DestroyService,
+            Event::KeyBoardInput { key_code: _ } => EventType::KeyBoardInput,
+            Event::MouseInput {
+                input_mouse_input: _,
+            } => EventType::MouseInput,
+            Event::TcpConnection { stream: _, id: _ } => EventType::TcpConnection,
+            Event::UserDefined(_) => EventType::UserDefined,
+            Event::CreateDaemon { daemon: _, id: _ } => EventType::CreateDaemon,
+            Event::NotifyNewTcpConnection { id: _ } => EventType::NotifyNewTcpConnection,
+            Event::TcpDisconnect { id: _ } => EventType::TcpDisconnect,
+            Event::NetInput { id: _, data: _ } => EventType::NetInput,
+            Event::NetOutput { id: _, data: _ } => EventType::NetOutput,
+            Event::HttpRequest { id: _, request: _ } => EventType::HttpRequest,
+            Event::HttpResponse { id: _, response: _ } => EventType::HttpResponse,
+            Event::RequestConnectionKill { id: _ } => EventType::RequestConnectionKill,
+            Event::RequestDaemonKill { id: _ } => EventType::RequestDaemonKill,
+            Event::RequestServiceKill { id: _ } => EventType::RequestServiceKill,
+            Event::RequestSubscriberKill { id: _ } => EventType::RequestSubscriberKill,
+            Event::DaemonCreated { id: _ } => EventType::DaemonCreated,
+            Event::RequestKill { id: _ } => EventType::RequestKill,
         }
     }
 }
@@ -192,23 +307,22 @@ pub enum EventRequest {
 #[async_trait]
 pub trait EventSub<T: ThreadSafeIsh>: ThreadSafeIsh {
     async fn on_create(&mut self, self_id: SubId, sender: EventSync<T>);
-
-    async fn wants_event(&self, event: &T) ->Throws<EventRequest> {
+    async fn wants_event(&self, event: &T) -> Throws<EventRequest> {
         _ = event;
         Ok(EventRequest::None)
     }
 
-    async fn wants_global_event(&self, event: &Event<T>) -> Throws<EventRequest>{
+    async fn wants_global_event(&self, event: &Event<T>) -> Throws<EventRequest> {
         _ = event;
         Ok(EventRequest::None)
     }
 
-    async fn on_event_owned(&mut self, event: T) ->Throws<()> {
+    async fn on_event_owned(&mut self, event: T) -> Throws<()> {
         _ = event;
         Ok(())
     }
 
-    async fn on_event(&mut self, event: &T) ->Throws<()>;
+    async fn on_event(&mut self, event: &T) -> Throws<()>;
 
     async fn on_global_event<'a>(&'a self, event: &Event<T>) -> Throws<()> {
         _ = event;
@@ -228,12 +342,13 @@ pub trait Service<T: ThreadSafeIsh>: ThreadSafeIsh {
 }
 
 #[async_trait]
-pub trait Daemon:ThreadSafeIsh{ 
+pub trait Daemon: ThreadSafeIsh {
     async fn run(&mut self);
 }
 struct Handler<T: ThreadSafeIsh> {
     subscribers: BTreeMap<SubId, Box<dyn EventSub<T>>>,
-    services: BTreeMap<ServiceId, Box<dyn Service<T>>>, 
+    services: BTreeMap<ServiceId, Box<dyn Service<T>>>,
+    daemons: BTreeSet<DaemonId>,
     sender: Sender<Event<T>>,
 }
 
@@ -248,6 +363,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
             subscribers: BTreeMap::new(),
             sender,
             services: BTreeMap::new(),
+            daemons: BTreeSet::new(),
         }
     }
 
@@ -284,7 +400,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
     ) {
         let mut min = 0;
         for i in 0..=u64::MAX {
-            if !self.services.contains_key(&ServiceId{inner:min}) {
+            if !self.services.contains_key(&ServiceId { inner: min }) {
                 min = i;
                 break;
             }
@@ -302,7 +418,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
         self.services.remove(&id);
     }
 
-    pub async fn handle_user_event(&mut self, ev: T) ->Throws<()> {
+    pub async fn handle_user_event(&mut self, ev: T) -> Throws<()> {
         for i in &mut self.subscribers {
             let v = i.1.wants_event(&ev).await?;
             match v {
@@ -321,22 +437,22 @@ impl<T: ThreadSafeIsh> Handler<T> {
         Ok(())
     }
 
-    pub async fn run_event(&mut self, i: Event<T>) ->Throws<()> {
-        for (_, sub) in &mut self.subscribers{
-            match sub.as_ref().wants_global_event(&i).await?{
-                EventRequest::None=>{
+    pub async fn run_event(&mut self, i: Event<T>) -> Throws<()> {
+        for (_, sub) in &mut self.subscribers {
+            match sub.as_ref().wants_global_event(&i).await? {
+                EventRequest::None => {
                     continue;
                 }
-                EventRequest::Shared=>{
+                EventRequest::Shared => {
                     sub.as_mut().on_global_event(&i).await?;
                 }
-                EventRequest::Owned=>{
+                EventRequest::Owned => {
                     sub.as_mut().on_global_event_owned(i).await?;
-                    return Ok(())
+                    return Ok(());
                 }
-
             }
         }
+        println!("LOG:{:#?}", i.get_type());
         match i {
             Event::CreateSubscriber(event_sub) => {
                 self.create_subscriber(event_sub, self.sender.clone()).await;
@@ -353,13 +469,48 @@ impl<T: ThreadSafeIsh> Handler<T> {
             Event::UserDefined(x) => {
                 self.handle_user_event(x).await?;
             }
-            Event::CreateDaemon { mut daemon }=>{
-                tokio::task::spawn(async move {
-                    daemon.run().await
-                });
+            Event::CreateDaemon { mut daemon, id } => {
+                tokio::task::spawn(async move { daemon.run().await });
+                self.daemons.insert(id);
+                self.sender.send(Event::DaemonCreated { id })?;
             }
-            _ => {
-                todo!()
+            Event::RequestDaemonKill { id } => {
+                self.daemons.remove(&id);
+                id.free();
+            }
+            Event::RequestServiceKill { id } => {
+                self.services.remove(&id);
+            }
+            Event::RequestSubscriberKill { id } => {
+                self.subscribers.remove(&id);
+            }
+            Event::KeyBoardInput { key_code:_ } => {
+                todo!();
+            },
+            Event::MouseInput { input_mouse_input:_ } =>{
+                todo!();
+            },
+            Event::TcpConnection { stream:_, id:_ } => {
+            }
+            Event::NotifyNewTcpConnection { id:_ } => {
+            }
+            Event::TcpDisconnect { id:_ } => {
+            }
+            Event::NetInput { id:_, data:_ } => {
+            }
+            Event::HttpRequest { id:_, request:_ } =>{
+            }
+            Event::HttpResponse { id:_, response:_ } => {
+            }
+            Event::NetOutput { id:_, data:_ } => {
+            }
+            Event::DaemonCreated { id:_ } => {
+                
+            }
+            Event::RequestConnectionKill { id:_ } => {
+              
+            }
+            Event::RequestKill { id:_ } => {
             }
         }
         Ok(())
@@ -420,13 +571,14 @@ impl<T: ThreadSafeIsh> EventHandler<T> {
     }
 }
 
-
 pub struct EventSync<T: ThreadSafeIsh> {
     sender: Option<Sender<Event<T>>>,
 }
-impl<T:ThreadSafeIsh> Clone for EventSync<T>{
+impl<T: ThreadSafeIsh> Clone for EventSync<T> {
     fn clone(&self) -> Self {
-        Self { sender: self.sender.clone() }
+        Self {
+            sender: self.sender.clone(),
+        }
     }
 }
 impl<T: ThreadSafeIsh> EventSync<T> {
@@ -436,7 +588,7 @@ impl<T: ThreadSafeIsh> EventSync<T> {
         }
     }
 
-    pub fn new_event(&self, ev: T) -> Throws<()>{
+    pub fn new_event(&self, ev: T) -> Throws<()> {
         self.sender
             .as_ref()
             .unwrap()
@@ -445,12 +597,8 @@ impl<T: ThreadSafeIsh> EventSync<T> {
         Ok(())
     }
 
-    pub fn new_event_global(&self, ev:Event<T>) -> Throws<()> {
-        self.sender
-            .as_ref()
-            .unwrap()
-            .send(ev)
-            .unwrap();
+    pub fn new_event_global(&self, ev: Event<T>) -> Throws<()> {
+        self.sender.as_ref().unwrap().send(ev).unwrap();
         Ok(())
     }
 
@@ -512,7 +660,7 @@ impl<T> BPipe<T> {
         Ok(recieving.pop_front())
     }
 
-    pub fn recieve_wait(&self) -> Throws<T>{
+    pub fn recieve_wait(&self) -> Throws<T> {
         loop {
             if self.done.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("done".into());
@@ -524,7 +672,7 @@ impl<T> BPipe<T> {
         }
     }
 
-    pub fn recieve_async(&self) -> impl Future<Output =Throws<T>> {
+    pub fn recieve_async(&self) -> impl Future<Output = Throws<T>> {
         pub struct Out<T> {
             reciever: Arc<Mutex<VecDeque<T>>>,
             done: Arc<AtomicBool>,
@@ -536,7 +684,7 @@ impl<T> BPipe<T> {
                 _cx: &mut std::task::Context<'_>,
             ) -> std::task::Poll<Self::Output> {
                 if self.done.load(std::sync::atomic::Ordering::Relaxed) {
-                    return std::task::Poll::Ready(Err::<T,Exception>("done".into()));
+                    return std::task::Poll::Ready(Err::<T, Exception>("done".into()));
                 }
                 let tmp = self.reciever.try_lock();
                 match tmp {
@@ -572,7 +720,6 @@ impl<T> Drop for BPipe<T> {
         self.done.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
-
 
 pub struct EventForwarder<T: ThreadSafeIsh> {
     self_id: SubId,
@@ -650,7 +797,7 @@ impl<T: ThreadSafeIsh + Clone> EventSub<T> for EventForwarder<T> {
         self.sender = sender;
     }
 
-    async fn on_event(&mut self, event: &T) -> Throws<()>{
+    async fn on_event(&mut self, event: &T) -> Throws<()> {
         self.pipe.as_ref().unwrap().send(event.clone())
     }
 
@@ -732,97 +879,83 @@ impl IdAllocatorInternal {
     }
 }
 
-pub struct WriteOnce<T>{
-    v:Arc<Mutex<Option<T>>>,
+pub struct WriteOnce<T> {
+    v: Arc<Mutex<Option<T>>>,
 }
-impl<T> WriteOnce<T>{
-    pub fn create()->(Self, Self){
+impl<T> WriteOnce<T> {
+    pub fn create() -> (Self, Self) {
         let vout = Arc::new(Mutex::new(None));
-        let a = Self{v:vout.clone()};
-        let b = Self{v:vout};
-        (a,b)
+        let a = Self { v: vout.clone() };
+        let b = Self { v: vout };
+        (a, b)
     }
-    pub fn read(&self)->impl Future<Output =Result<T, Box<dyn Error>>>{
-        struct Out<T>{
-            v:Arc<Mutex<Option<T>>>
+    pub fn read(&self) -> impl Future<Output = Result<T, Box<dyn Error>>> {
+        struct Out<T> {
+            v: Arc<Mutex<Option<T>>>,
         }
-        impl<T> Future for Out<T>{
+        impl<T> Future for Out<T> {
             type Output = Result<T, Box<dyn Error>>;
-            fn poll(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+            fn poll(
+                self: std::pin::Pin<&mut Self>,
+                _cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Self::Output> {
                 let lock = self.v.try_lock();
-                match lock{
+                match lock {
                     Ok(mut t) => {
-                        if let Some(m) = t.take(){
+                        if let Some(m) = t.take() {
                             std::task::Poll::Ready(Ok(m))
-                        }else{
+                        } else {
                             std::task::Poll::Pending
                         }
-               
-                    },
-                    Err(e) => {
-                        match e{
-                            std::sync::TryLockError::Poisoned(poison_error) =>{
-                                let mut lck = poison_error.into_inner();
-                                if let Some(m) = lck.take(){
-                                    std::task::Poll::Ready(Ok(m))
-                                }else{
-                                    std::task::Poll::Pending
-                                }
-                            }
-                            std::sync::TryLockError::WouldBlock => {
-                                std::task::Poll::Pending 
+                    }
+                    Err(e) => match e {
+                        std::sync::TryLockError::Poisoned(poison_error) => {
+                            let mut lck = poison_error.into_inner();
+                            if let Some(m) = lck.take() {
+                                std::task::Poll::Ready(Ok(m))
+                            } else {
+                                std::task::Poll::Pending
                             }
                         }
-                    }
+                        std::sync::TryLockError::WouldBlock => std::task::Poll::Pending,
+                    },
                 }
             }
         }
-        let out = Out{
-            v:self.v.clone()
-        };
+        let out = Out { v: self.v.clone() };
         out
     }
 
-    pub fn write(self, v:T){
+    pub fn write(self, v: T) {
         let lock = self.v.lock();
-        let mut value = match lock{
-            Ok(value)=>{
-                value
-            }
-            Err(value)=>{
-                value.into_inner()
-            }
+        let mut value = match lock {
+            Ok(value) => value,
+            Err(value) => value.into_inner(),
         };
         *value = Some(v);
     }
 
-    pub fn try_read(&self)->Result<Option<T>, Box<dyn Error>>{
-              let lock = self.v.try_lock();
-                match lock{
-                    Ok(mut t) => {
-                        if let Some(m) = t.take(){
-                            Ok(Some(m))
-                        }else{
-                            Ok(None)
-                        }
-               
-                    },
-                    Err(e) => {
-                        match e{
-                            std::sync::TryLockError::Poisoned(poison_error) =>{
-                                let mut lck = poison_error.into_inner();
-                                if let Some(m) = lck.take(){
-                                    Ok(Some(m))
-                                }else{
-                                    Ok(None)
-                                }
-                            }
-                            std::sync::TryLockError::WouldBlock => {
-                                Ok(None)
-                            }
-                        }
+    pub fn try_read(&self) -> Result<Option<T>, Box<dyn Error>> {
+        let lock = self.v.try_lock();
+        match lock {
+            Ok(mut t) => {
+                if let Some(m) = t.take() {
+                    Ok(Some(m))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => match e {
+                std::sync::TryLockError::Poisoned(poison_error) => {
+                    let mut lck = poison_error.into_inner();
+                    if let Some(m) = lck.take() {
+                        Ok(Some(m))
+                    } else {
+                        Ok(None)
                     }
                 }
+                std::sync::TryLockError::WouldBlock => Ok(None),
+            },
+        }
     }
-
 }
