@@ -127,7 +127,21 @@ pub async fn get_request(stream: &mut TcpStream) -> Throws<HTTPRequest> {
     let mut args = header_string.split_ascii_whitespace();
     let cmd = args.next().throw()?;
     match cmd {
-        "GET" => {}
+        "GET" => {
+            return http_parse_get(header_string, &mut stream);
+        }
+        "HEAD"=>{
+            return http_parse_head(header_string, &mut stream);
+        }
+        "POST"=>{
+            return http_parse_post(header_string, &mut stream);
+        }
+        "PUT"=>{
+            return http_parse_delete(header_string, &mut stream);
+        }
+        "CONNECT"=>{
+            return http_parse_connect(header_string, &mut stream);
+        }
         ""
         _ => {
             throw!(format!("error unknown argument to http request:{:#?}", cmd));
@@ -136,3 +150,22 @@ pub async fn get_request(stream: &mut TcpStream) -> Throws<HTTPRequest> {
     todo!()
 }
 
+pub async fn http_parse_get(header_string:&str, stream:&mut TCpStream)->THrows<HTTPRequest>{
+    todo!()
+}
+
+pub async fn http_parse_head(header_string:&str, stream:&mut TCpStream)->THrows<HTTPRequest>{
+    todo!()
+}
+
+pub async fn http_parse_post(header_string:&str, stream:&mut TCpStream)->THrows<HTTPRequest>{
+    todo!()
+}
+
+pub async fn http_parse_put(header_string:&str, stream:&mut TCpStream)->THrows<HTTPRequest>{
+    todo!()
+}
+
+pub async fn http_parse_connect(header_string:&str, stream:&mut TCpStream)->THrows<HTTPRequest>{
+    todo!()
+}
