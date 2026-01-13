@@ -4,8 +4,8 @@ use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 
 pub mod events;
-pub mod rpc;
 pub mod server;
+
 pub trait CopyFromStr{
     fn copy_from_str(&mut self, string:&str)->bool;
 }
@@ -243,66 +243,4 @@ impl<T:Into<Box<dyn std::error::Error+Send+Sync+'static>>> From<T> for Exception
     fn from(value: T) -> Self {
         new_exception!(value.into())
     }
-}
-
-pub async fn http_write_string_response(stream:&mut TcpStream,s:&[u8])->Throws<()>{
-    let f = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n", s.len());
-    stream.write(f.as_bytes()).await?;
-    stream.write(s).await?;
-    Ok(())
-}
-
-pub async fn http_write_html_response(stream:&mut TcpStream,s:&[u8])->Throws<()>{
-    let f = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n", s.len());
-    stream.write(f.as_bytes()).await?;
-    stream.write(s).await?;
-    Ok(())
-}
-
-pub async fn http_write_png_response(stream:&mut TcpStream,s:&[u8])->Throws<()>{
-    let f = format!("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",s.len());
-    stream.write(f.as_bytes()).await?;
-    stream.write(s).await?;
-    Ok(())
-}
-
-pub async fn http_write_jpg_response(stream:&mut TcpStream,s:&[u8])->Throws<()>{
-    let f = format!("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",s.len());
-    stream.write(f.as_bytes()).await?;
-    stream.write(s).await?;
-    Ok(())
-}
-
-pub async fn http_write_json_response(stream:&mut TcpStream,s:&[u8])->Throws<()>{
-    let f = format!("HTTP/1.1 200 OK\r\nContent-Type:text/json\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",s.len());
-    stream.write(f.as_bytes()).await?;
-    stream.write(s).await?;
-    Ok(())
-}
-
-pub async fn http_write_js_response(stream:&mut TcpStream,s:&[u8])->Throws<()>{
-    let f = format!("HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n", s.len());
-    stream.write(f.as_bytes()).await?;
-    stream.write(s).await?;
-    Ok(())
-}
-
-pub fn get_extension(s:&str)->&str{
-    let split = s.split('.');
-    let mut last = None;
-    for i in split{
-        last = Some(i);
-    }
-    let ext = if let Some(e) = last {e} else{
-        ""
-    };
-    ext
-}
-
-#[test]
-fn extension_tests(){
-    assert_eq!(get_extension("test.png"), "png");
-    assert_eq!(get_extension("test.bak.png"), "png");
-    assert_eq!(get_extension("test.jpeg"), "jpeg");
-    assert_eq!(get_extension("test.bak.jpeg"), "jpeg");
 }
