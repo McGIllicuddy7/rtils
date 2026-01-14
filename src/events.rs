@@ -4,16 +4,18 @@ use std::net::TcpStream;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-
+use crate::msg::{Message, Object, ObjectId};
+use serde::{Serialize,Deserialize};
 use async_trait::async_trait;
 
 #[allow(unused)]
 use crate::{Exception, Throw, Throws, server::HTTPRequest, server::HTTPResponse};
+
 #[macro_export]
 macro_rules! DEFINE_ID_WRAPPER {
     ($name:ident) => {
         #[allow(unused)]
-        #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
+        #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Serialize, Deserialize)]
         pub struct $name {
             inner: u64,
         }
@@ -135,6 +137,9 @@ pub enum EventType {
     RequestKill,
     RequestSubscriberKill,
     DaemonCreated,
+    Message,
+    AllocObject, 
+    FreeObject,
 }
 
 pub enum Event<T: ThreadSafeIsh> {
@@ -201,6 +206,14 @@ pub enum Event<T: ThreadSafeIsh> {
     RequestKill {
         id: u64,
     },
+    Message(Message),
+    AllocObject{
+        id:ObjectId,
+        object:Box<dyn Object>
+    }, 
+    FreeObject{
+            id:ObjectId,
+    },
 }
 impl<T: Clone + ThreadSafeIsh> Event<T> {
     pub fn try_clone(&self) -> Option<Event<T>> {
@@ -242,6 +255,9 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
             Event::RequestSubscriberKill { id } => Some(Event::RequestSubscriberKill { id: *id }),
             Event::RequestDaemonKill { id } => Some(Event::RequestDaemonKill { id: *id }),
             Event::DaemonCreated { id } => Some(Event::DaemonCreated { id: *id }),
+            Event::Message(message)=>Some(Event::Message(message.clone())),
+            Event::AllocObject { id:_, object:_, }=>None, 
+            Event::FreeObject { id:_ }=>None,
         }
     }
 
@@ -270,6 +286,9 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
             Event::RequestSubscriberKill { id: _ } => true,
             Event::RequestServiceKill { id: _ } => true,
             Event::DaemonCreated { id:_ } => true,
+            Event::Message(_)=>true,
+            Event::AllocObject { id:_, object:_ }=>false, 
+            Event::FreeObject { id:_ }=>false,
         }
     }
 }
@@ -299,6 +318,9 @@ impl<T:ThreadSafeIsh> Event<T>{
             Event::RequestSubscriberKill { id: _ } => EventType::RequestSubscriberKill,
             Event::DaemonCreated { id: _ } => EventType::DaemonCreated,
             Event::RequestKill { id: _ } => EventType::RequestKill,
+            Event::Message(_)=>EventType::Message,
+            Event::AllocObject { id:_, object:_ }=>EventType::AllocObject, 
+            Event::FreeObject { id:_,}=>EventType::FreeObject,
         }
     }
 }
@@ -354,6 +376,7 @@ struct Handler<T: ThreadSafeIsh> {
     subscribers: BTreeMap<SubId, Box<dyn EventSub<T>>>,
     services: BTreeMap<ServiceId, Box<dyn Service<T>>>,
     daemons: BTreeSet<DaemonId>,
+    objects:BTreeMap<ObjectId, Box<dyn Object>>,
     sender: Sender<Event<T>>,
 }
 
@@ -369,6 +392,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
             sender,
             services: BTreeMap::new(),
             daemons: BTreeSet::new(),
+            objects:BTreeMap::new(),
         }
     }
 
@@ -546,27 +570,21 @@ impl<T: ThreadSafeIsh> Handler<T> {
             Event::MouseInput { input_mouse_input:_ } =>{
                 todo!();
             },
-            Event::TcpConnection { stream:_, id:_ } => {
+            Event::Message(msg)=>{
+                let id = msg.target_id;
+                if let Some(obj) = self.objects.get_mut(&id){
+                    obj.as_mut().call(msg);
+                }
             }
-            Event::NotifyNewTcpConnection { id:_ } => {
+            Event::AllocObject { id, object }=>{
+                self.objects.insert(id, object);
             }
-            Event::TcpDisconnect { id:_ } => {
+            Event::FreeObject { id }=>{
+                self.objects.remove(&id);
+                id.free();
             }
-            Event::NetInput { id:_, data:_ } => {
-            }
-            Event::HttpRequest { id:_, request:_ } =>{
-            }
-            Event::HttpResponse { id:_, response:_ } => {
-            }
-            Event::NetOutput { id:_, data:_ } => {
-            }
-            Event::DaemonCreated { id:_ } => {
-                
-            }
-            Event::RequestConnectionKill { id:_ } => {
-              
-            }
-            Event::RequestKill { id:_ } => {
+            _=>{
+
             }
         }
         Ok(())
@@ -761,6 +779,11 @@ impl<T: ThreadSafeIsh> EventSync<T> {
     pub fn kill_subscriber(&self, to_kill:SubId)->Throws<()>{
            self.sender.as_ref().unwrap().send(Event::RequestSubscriberKill { id: to_kill})?;
         Ok(())  
+    }
+
+    pub fn new_message(&self, msg:Message)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::Message(msg))?;
+        Ok(())   
     }
 
     pub fn invalid() -> Self {

@@ -7,6 +7,7 @@ use std::{
 
 pub mod events;
 pub mod server;
+pub mod msg;
 
 pub trait CopyFromStr {
     fn copy_from_str(&mut self, string: &str) -> bool;
@@ -130,6 +131,7 @@ macro_rules! sscanf {
         dyn_scanf(($input).as_str(), $fmt, &mut [$(&mut $args), +])
     };
 }
+
 #[macro_export]
 macro_rules! MAKE_INTO_ERROR {
     ($t:ty) => {

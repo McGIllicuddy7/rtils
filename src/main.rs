@@ -1,12 +1,16 @@
 use std::io::stdin;
 
-use rtils::{dyn_scanf, server::file_server, sscanf};
-
+use rtils::{msg::{TestObject}, sscanf,dyn_scanf};
+use rtils::msg::test_object_test_wrapper_direct;
 
 #[tokio::main]
  async fn main(){
-    file_server("serve_dir", "127.0.0.1:8080".to_string()).await;
+    
+//file_server("serve_dir", "127.0.0.1:8080".to_string()).await;
+    let mut x = TestObject{};
+    test_object_test_wrapper_direct(&mut x, 1,2).unwrap();
 }
+
 #[allow(unused)]
 pub fn scanf_test(){
     let mut age = 0;
