@@ -1,4 +1,13 @@
-mod rtils_useful {
+pub mod rtils_useful {
+    #[allow(unused)]
+    use std::backtrace;
+    use std::collections::VecDeque;
+    use std::error::Error;
+    use std::fmt::Display;
+
+    use std::str::FromStr;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
     pub trait CopyFromStr {
         fn copy_from_str(&mut self, string: &str) -> bool;
     }
@@ -274,374 +283,383 @@ mod rtils_useful {
             new_exception!(value.into())
         }
     }
-    /* HTTP request enum, we will accept a body in any request for compatability with dumbshit because I
-     * am a good girl
-     * */
+    #[cfg(feature = "net")]
+    pub mod net {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::{TcpListener, TcpStream},
+        };
+        /* HTTP request enum, we will accept a body in any request for compatability with dumbshit because I
+         * am a good girl
+         * */
+        use super::*;
+        use tokio::net::TcpStream;
 
-    #[derive(Debug, Clone)]
-    pub enum HTTPRequest {
-        Get { target: Arc<str>, msg: Arc<[u8]> },
-        Head { target: Arc<str>, msg: Arc<[u8]> },
-        Post { target: Arc<str>, msg: Arc<[u8]> },
-        Put { target: Arc<str>, msg: Arc<[u8]> },
-        Delete { target: Arc<str>, msg: Arc<[u8]> },
-        Connect { target: Arc<str>, msg: Arc<[u8]> },
-        Options { target: Arc<str>, msg: Arc<[u8]> },
-        Trace { target: Arc<str>, msg: Arc<[u8]> },
-        Patch { target: Arc<str>, msg: Arc<[u8]> },
-    }
-
-    #[derive(Debug, Clone)]
-    pub enum HttpResponseType {
-        Text,
-        Html,
-        Png,
-        Jpeg,
-        Json,
-        Js,
-    }
-    #[derive(Debug, Clone)]
-    pub struct HTTPResponse {
-        pub response_type: HttpResponseType,
-        pub data: Arc<[u8]>,
-    }
-
-    pub async fn http_write_string_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
-        let f = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
-            s.len()
-        );
-        stream.write(f.as_bytes()).await?;
-        stream.write(s).await?;
-        Ok(())
-    }
-
-    pub async fn http_write_html_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
-        let f = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
-            s.len()
-        );
-        stream.write(f.as_bytes()).await?;
-        stream.write(s).await?;
-        Ok(())
-    }
-
-    pub async fn http_write_png_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
-        let f = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
-            s.len()
-        );
-        stream.write(f.as_bytes()).await?;
-        stream.write(s).await?;
-        Ok(())
-    }
-
-    pub async fn http_write_jpg_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
-        let f = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
-            s.len()
-        );
-        stream.write(f.as_bytes()).await?;
-        stream.write(s).await?;
-        Ok(())
-    }
-
-    pub async fn http_write_json_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
-        let f = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type:text/json\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
-            s.len()
-        );
-        stream.write(f.as_bytes()).await?;
-        stream.write(s).await?;
-        Ok(())
-    }
-
-    pub async fn http_write_js_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
-        let f = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
-            s.len()
-        );
-        stream.write(f.as_bytes()).await?;
-        stream.write(s).await?;
-        Ok(())
-    }
-
-    pub fn get_extension(s: &str) -> &str {
-        let split = s.split('.');
-        let mut last = None;
-        for i in split {
-            last = Some(i);
+        #[derive(Debug, Clone)]
+        pub enum HTTPRequest {
+            Get { target: Arc<str>, msg: Arc<[u8]> },
+            Head { target: Arc<str>, msg: Arc<[u8]> },
+            Post { target: Arc<str>, msg: Arc<[u8]> },
+            Put { target: Arc<str>, msg: Arc<[u8]> },
+            Delete { target: Arc<str>, msg: Arc<[u8]> },
+            Connect { target: Arc<str>, msg: Arc<[u8]> },
+            Options { target: Arc<str>, msg: Arc<[u8]> },
+            Trace { target: Arc<str>, msg: Arc<[u8]> },
+            Patch { target: Arc<str>, msg: Arc<[u8]> },
         }
-        let ext = if let Some(e) = last { e } else { "" };
-        ext
-    }
 
-    #[test]
-    fn extension_tests() {
-        assert_eq!(get_extension("test.png"), "png");
-        assert_eq!(get_extension("test.bak.png"), "png");
-        assert_eq!(get_extension("test.jpeg"), "jpeg");
-        assert_eq!(get_extension("test.bak.jpeg"), "jpeg");
-    }
-
-    pub async fn read_line(stream: &mut TcpStream) -> Throws<Vec<u8>> {
-        let mut idx = 0;
-        let mut tbuf = [0];
-        let mut buf = [0; 256];
-        let mut out = Vec::new();
-        loop {
-            let x = stream.read(&mut tbuf).await?;
-            if x == 0 {
-                break;
-            }
-            if tbuf[0] == b'\n' {
-                break;
-            }
-            buf[idx] = tbuf[0];
-            idx += 1;
-            if buf.len() <= idx {
-                for i in buf {
-                    out.push(i);
-                }
-                idx = 0;
-            }
+        #[derive(Debug, Clone)]
+        pub enum HttpResponseType {
+            Text,
+            Html,
+            Png,
+            Jpeg,
+            Json,
+            Js,
         }
-        for i in 0..idx {
-            out.push(buf[i]);
+        #[derive(Debug, Clone)]
+        pub struct HTTPResponse {
+            pub response_type: HttpResponseType,
+            pub data: Arc<[u8]>,
         }
-        return Ok(out);
-    }
 
-    pub async fn http_get_request(stream: &mut TcpStream) -> Throws<HTTPRequest> {
-        loop {
-            let header = read_line(stream).await?;
-            let header_string = std::str::from_utf8(&header)?;
-            let mut args = header_string.split_ascii_whitespace();
-            if args.clone().count() == 0 {
-                continue;
+        pub async fn http_write_string_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
+            let f = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
+                s.len()
+            );
+            stream.write(f.as_bytes()).await?;
+            stream.write(s).await?;
+            Ok(())
+        }
+
+        pub async fn http_write_html_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
+            let f = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
+                s.len()
+            );
+            stream.write(f.as_bytes()).await?;
+            stream.write(s).await?;
+            Ok(())
+        }
+
+        pub async fn http_write_png_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
+            let f = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
+                s.len()
+            );
+            stream.write(f.as_bytes()).await?;
+            stream.write(s).await?;
+            Ok(())
+        }
+
+        pub async fn http_write_jpg_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
+            let f = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
+                s.len()
+            );
+            stream.write(f.as_bytes()).await?;
+            stream.write(s).await?;
+            Ok(())
+        }
+
+        pub async fn http_write_json_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
+            let f = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type:text/json\r\ncharset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
+                s.len()
+            );
+            stream.write(f.as_bytes()).await?;
+            stream.write(s).await?;
+            Ok(())
+        }
+
+        pub async fn http_write_js_response(stream: &mut TcpStream, s: &[u8]) -> Throws<()> {
+            let f = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=UTF-8\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\n",
+                s.len()
+            );
+            stream.write(f.as_bytes()).await?;
+            stream.write(s).await?;
+            Ok(())
+        }
+
+        pub fn get_extension(s: &str) -> &str {
+            let split = s.split('.');
+            let mut last = None;
+            for i in split {
+                last = Some(i);
             }
-            let cmd = args.next().throw()?;
-            match cmd {
-                "GET" => {
-                    return http_parse_get(header_string, stream).await;
+            let ext = if let Some(e) = last { e } else { "" };
+            ext
+        }
+
+        #[test]
+        fn extension_tests() {
+            assert_eq!(get_extension("test.png"), "png");
+            assert_eq!(get_extension("test.bak.png"), "png");
+            assert_eq!(get_extension("test.jpeg"), "jpeg");
+            assert_eq!(get_extension("test.bak.jpeg"), "jpeg");
+        }
+
+        pub async fn read_line(stream: &mut TcpStream) -> Throws<Vec<u8>> {
+            let mut idx = 0;
+            let mut tbuf = [0];
+            let mut buf = [0; 256];
+            let mut out = Vec::new();
+            loop {
+                let x = stream.read(&mut tbuf).await?;
+                if x == 0 {
+                    break;
                 }
-                "HEAD" => {
-                    return http_parse_head(header_string, stream).await;
+                if tbuf[0] == b'\n' {
+                    break;
                 }
-                "POST" => {
-                    return http_parse_post(header_string, stream).await;
-                }
-                "PUT" => {
-                    return http_parse_put(header_string, stream).await;
-                }
-                "CONNECT" => {
-                    return http_parse_connect(header_string, stream).await;
-                }
-                "DELETE" => {
-                    return http_parse_delete(header_string, stream).await;
-                }
-                _ => {
-                    throw!(format!("error unknown argument to http request:{:#?}", cmd));
+                buf[idx] = tbuf[0];
+                idx += 1;
+                if buf.len() <= idx {
+                    for i in buf {
+                        out.push(i);
+                    }
+                    idx = 0;
                 }
             }
+            for i in 0..idx {
+                out.push(buf[i]);
+            }
+            return Ok(out);
         }
-    }
 
-    pub async fn http_parse_get(
-        header_string: &str,
-        stream: &mut TcpStream,
-    ) -> Throws<HTTPRequest> {
-        let mut l1 = header_string.split_ascii_whitespace();
-        let x = l1.next().throw()?;
-        let target = l1.next().throw()?;
-        assert!(x == "GET");
-        let mut cl = 0;
-        loop {
-            let s = read_line(stream).await?;
-            let s = str::from_utf8(&s)?.trim();
-            let xs = s.split_once(":");
-            if let Some((start, remainder)) = xs {
-                if start == "Content-Length" {
-                    cl = remainder.trim().parse::<usize>()?;
+        pub async fn http_get_request(stream: &mut TcpStream) -> Throws<HTTPRequest> {
+            loop {
+                let header = read_line(stream).await?;
+                let header_string = std::str::from_utf8(&header)?;
+                let mut args = header_string.split_ascii_whitespace();
+                if args.clone().count() == 0 {
+                    continue;
+                }
+                let cmd = args.next().throw()?;
+                match cmd {
+                    "GET" => {
+                        return http_parse_get(header_string, stream).await;
+                    }
+                    "HEAD" => {
+                        return http_parse_head(header_string, stream).await;
+                    }
+                    "POST" => {
+                        return http_parse_post(header_string, stream).await;
+                    }
+                    "PUT" => {
+                        return http_parse_put(header_string, stream).await;
+                    }
+                    "CONNECT" => {
+                        return http_parse_connect(header_string, stream).await;
+                    }
+                    "DELETE" => {
+                        return http_parse_delete(header_string, stream).await;
+                    }
+                    _ => {
+                        throw!(format!("error unknown argument to http request:{:#?}", cmd));
+                    }
                 }
             }
-            if s.len() == 0 {
-                break;
-            }
         }
-        let mut buf = Vec::with_capacity(cl);
-        for _ in 0..cl {
-            buf.push(0);
-        }
-        _ = stream.read_exact(&mut buf).await?;
-        Ok(HTTPRequest::Get {
-            target: target.into(),
-            msg: buf.into(),
-        })
-    }
 
-    pub async fn http_parse_head(
-        header_string: &str,
-        stream: &mut TcpStream,
-    ) -> Throws<HTTPRequest> {
-        let mut l1 = header_string.split_ascii_whitespace();
-        let x = l1.next().throw()?;
-        let target = l1.next().throw()?;
-        assert!(x == "HEAD");
-        let mut cl = 0;
-        loop {
-            let s = read_line(stream).await?;
-            let s = str::from_utf8(&s)?;
-            let xs = s.split_once(":");
-            if let Some((start, remainder)) = xs {
-                if start == "Content-Length" {
-                    cl = remainder.trim().parse::<usize>()?;
+        pub async fn http_parse_get(
+            header_string: &str,
+            stream: &mut TcpStream,
+        ) -> Throws<HTTPRequest> {
+            let mut l1 = header_string.split_ascii_whitespace();
+            let x = l1.next().throw()?;
+            let target = l1.next().throw()?;
+            assert!(x == "GET");
+            let mut cl = 0;
+            loop {
+                let s = read_line(stream).await?;
+                let s = str::from_utf8(&s)?.trim();
+                let xs = s.split_once(":");
+                if let Some((start, remainder)) = xs {
+                    if start == "Content-Length" {
+                        cl = remainder.trim().parse::<usize>()?;
+                    }
+                }
+                if s.len() == 0 {
+                    break;
                 }
             }
-            if s.len() == 0 {
-                break;
+            let mut buf = Vec::with_capacity(cl);
+            for _ in 0..cl {
+                buf.push(0);
             }
+            _ = stream.read_exact(&mut buf).await?;
+            Ok(HTTPRequest::Get {
+                target: target.into(),
+                msg: buf.into(),
+            })
         }
-        let mut buf = Vec::with_capacity(cl);
-        for _ in 0..cl {
-            buf.push(0);
-        }
-        _ = stream.read_exact(&mut buf).await?;
-        Ok(HTTPRequest::Head {
-            target: target.into(),
-            msg: buf.into(),
-        })
-    }
 
-    pub async fn http_parse_post(
-        header_string: &str,
-        stream: &mut TcpStream,
-    ) -> Throws<HTTPRequest> {
-        let mut l1 = header_string.split_ascii_whitespace();
-        let x = l1.next().throw()?;
-        let target = l1.next().throw()?;
-        assert!(x == "POST");
-        let mut cl = 0;
-        loop {
-            let s = read_line(stream).await?;
-            let s = str::from_utf8(&s)?.trim();
-            let xs = s.split_once(":");
-            if let Some((start, remainder)) = xs {
-                if start == "Content-Length" {
-                    cl = remainder.trim().parse::<usize>()?;
+        pub async fn http_parse_head(
+            header_string: &str,
+            stream: &mut TcpStream,
+        ) -> Throws<HTTPRequest> {
+            let mut l1 = header_string.split_ascii_whitespace();
+            let x = l1.next().throw()?;
+            let target = l1.next().throw()?;
+            assert!(x == "HEAD");
+            let mut cl = 0;
+            loop {
+                let s = read_line(stream).await?;
+                let s = str::from_utf8(&s)?;
+                let xs = s.split_once(":");
+                if let Some((start, remainder)) = xs {
+                    if start == "Content-Length" {
+                        cl = remainder.trim().parse::<usize>()?;
+                    }
+                }
+                if s.len() == 0 {
+                    break;
                 }
             }
-            if s.len() == 0 {
-                break;
+            let mut buf = Vec::with_capacity(cl);
+            for _ in 0..cl {
+                buf.push(0);
             }
+            _ = stream.read_exact(&mut buf).await?;
+            Ok(HTTPRequest::Head {
+                target: target.into(),
+                msg: buf.into(),
+            })
         }
-        let mut buf = Vec::with_capacity(cl);
-        for _ in 0..cl {
-            buf.push(0);
-        }
-        _ = stream.read_exact(&mut buf).await.unwrap();
-        Ok(HTTPRequest::Post {
-            target: target.into(),
-            msg: buf.into(),
-        })
-    }
 
-    pub async fn http_parse_put(
-        header_string: &str,
-        stream: &mut TcpStream,
-    ) -> Throws<HTTPRequest> {
-        let mut l1 = header_string.split_ascii_whitespace();
-        let x = l1.next().throw()?;
-        let target = l1.next().throw()?;
-        assert!(x == "PUT");
-        let mut cl = 0;
-        loop {
-            let s = read_line(stream).await?;
-            let s = str::from_utf8(&s)?;
-            let xs = s.split_once(":");
-            if let Some((start, remainder)) = xs {
-                if start == "Content-Length" {
-                    cl = remainder.trim().parse::<usize>()?;
+        pub async fn http_parse_post(
+            header_string: &str,
+            stream: &mut TcpStream,
+        ) -> Throws<HTTPRequest> {
+            let mut l1 = header_string.split_ascii_whitespace();
+            let x = l1.next().throw()?;
+            let target = l1.next().throw()?;
+            assert!(x == "POST");
+            let mut cl = 0;
+            loop {
+                let s = read_line(stream).await?;
+                let s = str::from_utf8(&s)?.trim();
+                let xs = s.split_once(":");
+                if let Some((start, remainder)) = xs {
+                    if start == "Content-Length" {
+                        cl = remainder.trim().parse::<usize>()?;
+                    }
+                }
+                if s.len() == 0 {
+                    break;
                 }
             }
-            if s.len() == 0 {
-                break;
+            let mut buf = Vec::with_capacity(cl);
+            for _ in 0..cl {
+                buf.push(0);
             }
+            _ = stream.read_exact(&mut buf).await.unwrap();
+            Ok(HTTPRequest::Post {
+                target: target.into(),
+                msg: buf.into(),
+            })
         }
-        let mut buf = Vec::with_capacity(cl);
-        for _ in 0..cl {
-            buf.push(0);
-        }
-        _ = stream.read_exact(&mut buf).await?;
-        Ok(HTTPRequest::Put {
-            target: target.into(),
-            msg: buf.into(),
-        })
-    }
 
-    pub async fn http_parse_connect(
-        header_string: &str,
-        stream: &mut TcpStream,
-    ) -> Throws<HTTPRequest> {
-        let mut l1 = header_string.split_ascii_whitespace();
-        let x = l1.next().throw()?;
-        let target = l1.next().throw()?;
-        assert!(x == "CONNECT");
-        let mut cl = 0;
-        loop {
-            let s = read_line(stream).await?;
-            let s = str::from_utf8(&s)?;
-            let xs = s.split_once(":");
-            if let Some((start, remainder)) = xs {
-                if start == "Content-Length" {
-                    cl = remainder.trim().parse::<usize>()?;
+        pub async fn http_parse_put(
+            header_string: &str,
+            stream: &mut TcpStream,
+        ) -> Throws<HTTPRequest> {
+            let mut l1 = header_string.split_ascii_whitespace();
+            let x = l1.next().throw()?;
+            let target = l1.next().throw()?;
+            assert!(x == "PUT");
+            let mut cl = 0;
+            loop {
+                let s = read_line(stream).await?;
+                let s = str::from_utf8(&s)?;
+                let xs = s.split_once(":");
+                if let Some((start, remainder)) = xs {
+                    if start == "Content-Length" {
+                        cl = remainder.trim().parse::<usize>()?;
+                    }
+                }
+                if s.len() == 0 {
+                    break;
                 }
             }
-            if s.len() == 0 {
-                break;
+            let mut buf = Vec::with_capacity(cl);
+            for _ in 0..cl {
+                buf.push(0);
             }
+            _ = stream.read_exact(&mut buf).await?;
+            Ok(HTTPRequest::Put {
+                target: target.into(),
+                msg: buf.into(),
+            })
         }
-        let mut buf = Vec::with_capacity(cl);
-        for _ in 0..cl {
-            buf.push(0);
-        }
-        _ = stream.read_exact(&mut buf).await?;
-        Ok(HTTPRequest::Connect {
-            target: target.into(),
-            msg: buf.into(),
-        })
-    }
 
-    pub async fn http_parse_delete(
-        header_string: &str,
-        stream: &mut TcpStream,
-    ) -> Throws<HTTPRequest> {
-        let mut l1 = header_string.split_ascii_whitespace();
-        let x = l1.next().throw()?;
-        let target = l1.next().throw()?;
-        assert!(x == "DELETE");
-        let mut cl = 0;
-        loop {
-            let s = read_line(stream).await?;
-            let s = str::from_utf8(&s)?;
-            let xs = s.split_once(":");
-            if let Some((start, remainder)) = xs {
-                if start == "Content-Length" {
-                    cl = remainder.trim().parse::<usize>()?;
+        pub async fn http_parse_connect(
+            header_string: &str,
+            stream: &mut TcpStream,
+        ) -> Throws<HTTPRequest> {
+            let mut l1 = header_string.split_ascii_whitespace();
+            let x = l1.next().throw()?;
+            let target = l1.next().throw()?;
+            assert!(x == "CONNECT");
+            let mut cl = 0;
+            loop {
+                let s = read_line(stream).await?;
+                let s = str::from_utf8(&s)?;
+                let xs = s.split_once(":");
+                if let Some((start, remainder)) = xs {
+                    if start == "Content-Length" {
+                        cl = remainder.trim().parse::<usize>()?;
+                    }
+                }
+                if s.len() == 0 {
+                    break;
                 }
             }
-            if s.len() == 0 {
-                break;
+            let mut buf = Vec::with_capacity(cl);
+            for _ in 0..cl {
+                buf.push(0);
             }
+            _ = stream.read_exact(&mut buf).await?;
+            Ok(HTTPRequest::Connect {
+                target: target.into(),
+                msg: buf.into(),
+            })
         }
-        let mut buf = Vec::with_capacity(cl);
-        for _ in 0..cl {
-            buf.push(0);
+
+        pub async fn http_parse_delete(
+            header_string: &str,
+            stream: &mut TcpStream,
+        ) -> Throws<HTTPRequest> {
+            let mut l1 = header_string.split_ascii_whitespace();
+            let x = l1.next().throw()?;
+            let target = l1.next().throw()?;
+            assert!(x == "DELETE");
+            let mut cl = 0;
+            loop {
+                let s = read_line(stream).await?;
+                let s = str::from_utf8(&s)?;
+                let xs = s.split_once(":");
+                if let Some((start, remainder)) = xs {
+                    if start == "Content-Length" {
+                        cl = remainder.trim().parse::<usize>()?;
+                    }
+                }
+                if s.len() == 0 {
+                    break;
+                }
+            }
+            let mut buf = Vec::with_capacity(cl);
+            for _ in 0..cl {
+                buf.push(0);
+            }
+            Ok(HTTPRequest::Delete {
+                target: target.into(),
+                msg: buf.into(),
+            })
         }
-        Ok(HTTPRequest::Delete {
-            target: target.into(),
-            msg: buf.into(),
-        })
     }
 
     pub struct WriteOnce<T> {

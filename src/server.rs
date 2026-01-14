@@ -725,4 +725,3 @@ pub async fn file_server_setup(sync: EventSync<ServerEvent>, serve_dir: String, 
     })
     .unwrap();
 }
-
