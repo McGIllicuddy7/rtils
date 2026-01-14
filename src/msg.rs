@@ -138,4 +138,6 @@ impl TestObject{
 
 define_method!(TestObject,
     test_object,
-    (fn test(x:i32, y:i32)));
+    (fn test(x:i32, y:i32)),
+    (fn test_2(x1:i32))
+);
