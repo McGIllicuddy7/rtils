@@ -1,12 +1,12 @@
+use crate::msg::{Message, Object, ObjectId};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::net::TcpStream;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use crate::msg::{Message, Object, ObjectId};
-use serde::{Serialize,Deserialize};
-use async_trait::async_trait;
 
 #[allow(unused)]
 use crate::{Exception, Throw, Throws, server::HTTPRequest, server::HTTPResponse};
@@ -15,7 +15,9 @@ use crate::{Exception, Throw, Throws, server::HTTPRequest, server::HTTPResponse}
 macro_rules! DEFINE_ID_WRAPPER {
     ($name:ident) => {
         #[allow(unused)]
-        #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Serialize, Deserialize)]
+        #[derive(
+            Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Serialize, Deserialize,
+        )]
         pub struct $name {
             inner: u64,
         }
@@ -27,9 +29,7 @@ macro_rules! DEFINE_ID_WRAPPER {
                 self.inner
             }
             pub fn alloc() -> Self {
-                Self {
-                    inner: IDS.alloc(),
-                }
+                Self { inner: IDS.alloc() }
             }
             pub fn alloc_high_priority() -> Self {
                 Self {
@@ -138,7 +138,7 @@ pub enum EventType {
     RequestSubscriberKill,
     DaemonCreated,
     Message,
-    AllocObject, 
+    AllocObject,
     FreeObject,
 }
 
@@ -207,12 +207,12 @@ pub enum Event<T: ThreadSafeIsh> {
         id: u64,
     },
     Message(Message),
-    AllocObject{
-        id:ObjectId,
-        object:Box<dyn Object>
-    }, 
-    FreeObject{
-            id:ObjectId,
+    AllocObject {
+        id: ObjectId,
+        object: Box<dyn Object>,
+    },
+    FreeObject {
+        id: ObjectId,
     },
 }
 impl<T: Clone + ThreadSafeIsh> Event<T> {
@@ -220,7 +220,7 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
         match self {
             Event::CreateSubscriber(_, _) => None,
             Event::DestroySubscriber { id: _ } => None,
-            Event::CreateService(_,_) => None,
+            Event::CreateService(_, _) => None,
             Event::DestroyService { id: _ } => None,
             Event::KeyBoardInput { key_code } => Some(Event::KeyBoardInput {
                 key_code: *key_code,
@@ -255,17 +255,17 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
             Event::RequestSubscriberKill { id } => Some(Event::RequestSubscriberKill { id: *id }),
             Event::RequestDaemonKill { id } => Some(Event::RequestDaemonKill { id: *id }),
             Event::DaemonCreated { id } => Some(Event::DaemonCreated { id: *id }),
-            Event::Message(message)=>Some(Event::Message(message.clone())),
-            Event::AllocObject { id:_, object:_, }=>None, 
-            Event::FreeObject { id:_ }=>None,
+            Event::Message(message) => Some(Event::Message(message.clone())),
+            Event::AllocObject { id: _, object: _ } => None,
+            Event::FreeObject { id: _ } => None,
         }
     }
 
     pub fn is_clonable(&self) -> bool {
         match self {
-            Event::CreateSubscriber(_,_) => false,
+            Event::CreateSubscriber(_, _) => false,
             Event::DestroySubscriber { id: _ } => false,
-            Event::CreateService(_,_) => false,
+            Event::CreateService(_, _) => false,
             Event::DestroyService { id: _ } => false,
             Event::KeyBoardInput { key_code: _ } => true,
             Event::MouseInput {
@@ -285,19 +285,19 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
             Event::RequestDaemonKill { id: _ } => true,
             Event::RequestSubscriberKill { id: _ } => true,
             Event::RequestServiceKill { id: _ } => true,
-            Event::DaemonCreated { id:_ } => true,
-            Event::Message(_)=>true,
-            Event::AllocObject { id:_, object:_ }=>false, 
-            Event::FreeObject { id:_ }=>false,
+            Event::DaemonCreated { id: _ } => true,
+            Event::Message(_) => true,
+            Event::AllocObject { id: _, object: _ } => false,
+            Event::FreeObject { id: _ } => false,
         }
     }
 }
-impl<T:ThreadSafeIsh> Event<T>{
-        pub fn get_type(&self) -> EventType {
+impl<T: ThreadSafeIsh> Event<T> {
+    pub fn get_type(&self) -> EventType {
         match self {
-            Event::CreateSubscriber(_,_) => EventType::CreateSubscriber,
+            Event::CreateSubscriber(_, _) => EventType::CreateSubscriber,
             Event::DestroySubscriber { id: _ } => EventType::DestroySubscriber,
-            Event::CreateService(_,_) => EventType::CreateService,
+            Event::CreateService(_, _) => EventType::CreateService,
             Event::DestroyService { id: _ } => EventType::DestroyService,
             Event::KeyBoardInput { key_code: _ } => EventType::KeyBoardInput,
             Event::MouseInput {
@@ -318,9 +318,9 @@ impl<T:ThreadSafeIsh> Event<T>{
             Event::RequestSubscriberKill { id: _ } => EventType::RequestSubscriberKill,
             Event::DaemonCreated { id: _ } => EventType::DaemonCreated,
             Event::RequestKill { id: _ } => EventType::RequestKill,
-            Event::Message(_)=>EventType::Message,
-            Event::AllocObject { id:_, object:_ }=>EventType::AllocObject, 
-            Event::FreeObject { id:_,}=>EventType::FreeObject,
+            Event::Message(_) => EventType::Message,
+            Event::AllocObject { id: _, object: _ } => EventType::AllocObject,
+            Event::FreeObject { id: _ } => EventType::FreeObject,
         }
     }
 }
@@ -376,7 +376,7 @@ struct Handler<T: ThreadSafeIsh> {
     subscribers: BTreeMap<SubId, Box<dyn EventSub<T>>>,
     services: BTreeMap<ServiceId, Box<dyn Service<T>>>,
     daemons: BTreeSet<DaemonId>,
-    objects:BTreeMap<ObjectId, Box<dyn Object>>,
+    objects: BTreeMap<ObjectId, Box<dyn Object>>,
     sender: Sender<Event<T>>,
 }
 
@@ -392,7 +392,7 @@ impl<T: ThreadSafeIsh> Handler<T> {
             sender,
             services: BTreeMap::new(),
             daemons: BTreeSet::new(),
-            objects:BTreeMap::new(),
+            objects: BTreeMap::new(),
         }
     }
 
@@ -525,21 +525,22 @@ impl<T: ThreadSafeIsh> Handler<T> {
         }
         println!("LOG:{:#?}", i.get_type());
         match i {
-            Event::CreateSubscriber(event_sub,high_priority) => {
-                if high_priority{
-                    self.create_subscriber_high_priority(event_sub, self.sender.clone()).await;
-                }else{
+            Event::CreateSubscriber(event_sub, high_priority) => {
+                if high_priority {
+                    self.create_subscriber_high_priority(event_sub, self.sender.clone())
+                        .await;
+                } else {
                     self.create_subscriber(event_sub, self.sender.clone()).await;
                 }
-
             }
             Event::DestroySubscriber { id } => {
                 self.destroy_subscriber(id).await;
             }
-            Event::CreateService(service,high_priority) => {
-                if high_priority{
-                    self.create_service_high_priority(service, self.sender.clone()).await; 
-                }else{
+            Event::CreateService(service, high_priority) => {
+                if high_priority {
+                    self.create_service_high_priority(service, self.sender.clone())
+                        .await;
+                } else {
                     self.create_service(service, self.sender.clone()).await;
                 }
             }
@@ -564,28 +565,28 @@ impl<T: ThreadSafeIsh> Handler<T> {
             Event::RequestSubscriberKill { id } => {
                 self.subscribers.remove(&id);
             }
-            Event::KeyBoardInput { key_code:_ } => {
+            Event::KeyBoardInput { key_code: _ } => {
                 todo!();
-            },
-            Event::MouseInput { input_mouse_input:_ } =>{
+            }
+            Event::MouseInput {
+                input_mouse_input: _,
+            } => {
                 todo!();
-            },
-            Event::Message(msg)=>{
+            }
+            Event::Message(msg) => {
                 let id = msg.target_id;
-                if let Some(obj) = self.objects.get_mut(&id){
+                if let Some(obj) = self.objects.get_mut(&id) {
                     obj.as_mut().call(msg);
                 }
             }
-            Event::AllocObject { id, object }=>{
+            Event::AllocObject { id, object } => {
                 self.objects.insert(id, object);
             }
-            Event::FreeObject { id }=>{
+            Event::FreeObject { id } => {
                 self.objects.remove(&id);
                 id.free();
             }
-            _=>{
-
-            }
+            _ => {}
         }
         Ok(())
     }
@@ -684,106 +685,148 @@ impl<T: ThreadSafeIsh> EventSync<T> {
         self.sender
             .as_ref()
             .unwrap()
-            .send(Event::CreateSubscriber(bx,false))?;
+            .send(Event::CreateSubscriber(bx, false))?;
         Ok(())
     }
 
-    pub fn create_new_service<Serv:Service<T>+ 'static>(
+    pub fn create_new_service<Serv: Service<T> + 'static>(
         &self,
-        service:Serv
+        service: Serv,
     ) -> Result<(), Box<dyn Error>> {
         let bx = Box::new(service) as Box<dyn Service<T>>;
         self.sender
             .as_ref()
             .unwrap()
-            .send(Event::CreateService(bx,false))?;
+            .send(Event::CreateService(bx, false))?;
         Ok(())
     }
 
-    pub fn create_new_service_high_priority<Serv:Service<T>+ 'static>(
+    pub fn create_new_service_high_priority<Serv: Service<T> + 'static>(
         &self,
-        service:Serv
+        service: Serv,
     ) -> Result<(), Box<dyn Error>> {
         let bx = Box::new(service) as Box<dyn Service<T>>;
         self.sender
             .as_ref()
             .unwrap()
-            .send(Event::CreateService(bx,true))?;
+            .send(Event::CreateService(bx, true))?;
         Ok(())
     }
 
-    pub fn destroy_subscriber(&self, id:SubId)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::DestroySubscriber { id })?;
+    pub fn destroy_subscriber(&self, id: SubId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::DestroySubscriber { id })?;
         Ok(())
     }
 
-    pub fn destroy_service(&self, id:ServiceId)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::DestroyService { id })?;
-        Ok(())
-    } 
-
-    pub fn tcp_connection(&self, stream:TcpStream, id:TcpConnectionId)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::TcpConnection {stream, id })?;
+    pub fn destroy_service(&self, id: ServiceId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::DestroyService { id })?;
         Ok(())
     }
 
-    pub fn new_tcp_connection(&self, id:TcpConnectionId)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::NotifyNewTcpConnection { id })?;
+    pub fn tcp_connection(&self, stream: TcpStream, id: TcpConnectionId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::TcpConnection { stream, id })?;
         Ok(())
     }
 
-    pub fn tcp_disconnect(&self, id:TcpConnectionId)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::NotifyNewTcpConnection { id })?;
+    pub fn new_tcp_connection(&self, id: TcpConnectionId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::NotifyNewTcpConnection { id })?;
         Ok(())
     }
 
-    pub fn net_input(&self, id:TcpConnectionId, data:Arc<[u8]>)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::NetInput { id, data })?;
+    pub fn tcp_disconnect(&self, id: TcpConnectionId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::NotifyNewTcpConnection { id })?;
         Ok(())
     }
 
-    pub fn http_request(&self, id:TcpConnectionId, request:HTTPRequest)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::HttpRequest { id, request })?;
+    pub fn net_input(&self, id: TcpConnectionId, data: Arc<[u8]>) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::NetInput { id, data })?;
         Ok(())
     }
 
-    pub fn http_response(&self, id:TcpConnectionId, response:HTTPResponse)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::HttpResponse { id, response })?;
+    pub fn http_request(&self, id: TcpConnectionId, request: HTTPRequest) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::HttpRequest { id, request })?;
         Ok(())
     }
 
-    pub fn net_output(&self,id:TcpConnectionId, data:Arc<[u8]>)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::NetOutput { id, data})?;
-        Ok(()) 
-    }
-    pub fn create_daemon(&self, daemon:Box<dyn Daemon>, id:DaemonId)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::CreateDaemon { daemon, id })?;
+    pub fn http_response(&self, id: TcpConnectionId, response: HTTPResponse) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::HttpResponse { id, response })?;
         Ok(())
     }
 
-    pub fn kill_daemon(&self, to_kill:DaemonId)->Throws<()>{
-        self.sender.as_ref().unwrap().send(Event::RequestDaemonKill { id: to_kill})?;
-        Ok(()) 
+    pub fn net_output(&self, id: TcpConnectionId, data: Arc<[u8]>) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::NetOutput { id, data })?;
+        Ok(())
+    }
+    pub fn create_daemon(&self, daemon: Box<dyn Daemon>, id: DaemonId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::CreateDaemon { daemon, id })?;
+        Ok(())
     }
 
-    pub fn kill_connection(&self, to_kill:TcpConnectionId)->Throws<()>{
-           self.sender.as_ref().unwrap().send(Event::RequestConnectionKill { id: to_kill})?;
-        Ok(())  
+    pub fn kill_daemon(&self, to_kill: DaemonId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::RequestDaemonKill { id: to_kill })?;
+        Ok(())
     }
 
-    pub fn kill_service(&self, to_kill:ServiceId)->Throws<()>{
-           self.sender.as_ref().unwrap().send(Event::RequestServiceKill { id: to_kill})?;
-        Ok(())  
-    }
-        
-    pub fn kill_subscriber(&self, to_kill:SubId)->Throws<()>{
-           self.sender.as_ref().unwrap().send(Event::RequestSubscriberKill { id: to_kill})?;
-        Ok(())  
+    pub fn kill_connection(&self, to_kill: TcpConnectionId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::RequestConnectionKill { id: to_kill })?;
+        Ok(())
     }
 
-    pub fn new_message(&self, msg:Message)->Throws<()>{
+    pub fn kill_service(&self, to_kill: ServiceId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::RequestServiceKill { id: to_kill })?;
+        Ok(())
+    }
+
+    pub fn kill_subscriber(&self, to_kill: SubId) -> Throws<()> {
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::RequestSubscriberKill { id: to_kill })?;
+        Ok(())
+    }
+
+    pub fn new_message(&self, msg: Message) -> Throws<()> {
         self.sender.as_ref().unwrap().send(Event::Message(msg))?;
-        Ok(())   
+        Ok(())
     }
 
     pub fn invalid() -> Self {

@@ -1,13 +1,9 @@
-use std::{
-    backtrace,
-    fmt::Display,
-    str::FromStr,
-};
-
+use std::{backtrace, fmt::Display, str::FromStr};
 
 pub mod events;
-pub mod server;
 pub mod msg;
+pub mod server;
+pub mod useful;
 
 pub trait CopyFromStr {
     fn copy_from_str(&mut self, string: &str) -> bool;
