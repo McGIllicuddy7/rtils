@@ -1,10 +1,9 @@
 use std::{
     backtrace,
-    fmt::{Display, write},
+    fmt::Display,
     str::FromStr,
 };
 
-use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 pub mod events;
 pub mod server;

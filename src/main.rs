@@ -1,6 +1,6 @@
-use std::io::{Write, stdin, stdout};
+use std::io::stdin;
 
-use rtils::{dyn_scanf, events::EventHandler, server::file_server, sscanf};
+use rtils::{dyn_scanf, server::file_server, sscanf};
 
 
 #[tokio::main]

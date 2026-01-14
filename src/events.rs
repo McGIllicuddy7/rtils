@@ -26,11 +26,16 @@ macro_rules! DEFINE_ID_WRAPPER {
             }
             pub fn alloc() -> Self {
                 Self {
-                    inner: IDS.alloc_general(),
+                    inner: IDS.alloc(),
+                }
+            }
+            pub fn alloc_high_priority() -> Self {
+                Self {
+                    inner: IDS.alloc_high_priority(),
                 }
             }
             pub fn free(self) {
-                IDS.free_general(self.inner)
+                IDS.free(self.inner)
             }
         }
     };
@@ -133,11 +138,11 @@ pub enum EventType {
 }
 
 pub enum Event<T: ThreadSafeIsh> {
-    CreateSubscriber(Box<dyn EventSub<T>>),
+    CreateSubscriber(Box<dyn EventSub<T>>, bool),
     DestroySubscriber {
         id: SubId,
     },
-    CreateService(Box<dyn Service<T>>),
+    CreateService(Box<dyn Service<T>>, bool),
     DestroyService {
         id: ServiceId,
     },
@@ -200,9 +205,9 @@ pub enum Event<T: ThreadSafeIsh> {
 impl<T: Clone + ThreadSafeIsh> Event<T> {
     pub fn try_clone(&self) -> Option<Event<T>> {
         match self {
-            Event::CreateSubscriber(_) => None,
+            Event::CreateSubscriber(_, _) => None,
             Event::DestroySubscriber { id: _ } => None,
-            Event::CreateService(_) => None,
+            Event::CreateService(_,_) => None,
             Event::DestroyService { id: _ } => None,
             Event::KeyBoardInput { key_code } => Some(Event::KeyBoardInput {
                 key_code: *key_code,
@@ -242,9 +247,9 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
 
     pub fn is_clonable(&self) -> bool {
         match self {
-            Event::CreateSubscriber(_) => false,
+            Event::CreateSubscriber(_,_) => false,
             Event::DestroySubscriber { id: _ } => false,
-            Event::CreateService(_) => false,
+            Event::CreateService(_,_) => false,
             Event::DestroyService { id: _ } => false,
             Event::KeyBoardInput { key_code: _ } => true,
             Event::MouseInput {
@@ -264,16 +269,16 @@ impl<T: Clone + ThreadSafeIsh> Event<T> {
             Event::RequestDaemonKill { id: _ } => true,
             Event::RequestSubscriberKill { id: _ } => true,
             Event::RequestServiceKill { id: _ } => true,
-            Event::DaemonCreated { id } => true,
+            Event::DaemonCreated { id:_ } => true,
         }
     }
 }
 impl<T:ThreadSafeIsh> Event<T>{
         pub fn get_type(&self) -> EventType {
         match self {
-            Event::CreateSubscriber(_) => EventType::CreateSubscriber,
+            Event::CreateSubscriber(_,_) => EventType::CreateSubscriber,
             Event::DestroySubscriber { id: _ } => EventType::DestroySubscriber,
-            Event::CreateService(_) => EventType::CreateService,
+            Event::CreateService(_,_) => EventType::CreateService,
             Event::DestroyService { id: _ } => EventType::DestroyService,
             Event::KeyBoardInput { key_code: _ } => EventType::KeyBoardInput,
             Event::MouseInput {
@@ -372,6 +377,27 @@ impl<T: ThreadSafeIsh> Handler<T> {
         mut event_sub: Box<dyn EventSub<T>>,
         sender: Sender<Event<T>>,
     ) {
+        let mut min = 2048;
+        for i in 2048..=u64::MAX {
+            if !self.subscribers.contains_key(&SubId { inner: i }) {
+                min = i;
+                break;
+            }
+        }
+        if min == u64::MAX {
+            panic!();
+        }
+        event_sub
+            .as_mut()
+            .on_create(SubId { inner: min }, EventSync::new(sender))
+            .await;
+        self.subscribers.insert(SubId { inner: min }, event_sub);
+    }
+    pub async fn create_subscriber_high_priority(
+        &mut self,
+        mut event_sub: Box<dyn EventSub<T>>,
+        sender: Sender<Event<T>>,
+    ) {
         let mut min = 0;
         for i in 0..=u64::MAX {
             if !self.subscribers.contains_key(&SubId { inner: i }) {
@@ -394,6 +420,27 @@ impl<T: ThreadSafeIsh> Handler<T> {
     }
 
     pub async fn create_service(
+        &mut self,
+        mut service: Box<dyn Service<T>>,
+        sender: Sender<Event<T>>,
+    ) {
+        let mut min = 2048;
+        for i in 2048..=u64::MAX {
+            if !self.services.contains_key(&ServiceId { inner: min }) {
+                min = i;
+                break;
+            }
+        }
+        if min == u64::MAX {
+            panic!();
+        }
+        service
+            .create(ServiceId { inner: min }, EventSync::new(sender))
+            .await;
+        self.services.insert(ServiceId { inner: min }, service);
+    }
+
+    pub async fn create_service_high_priority(
         &mut self,
         mut service: Box<dyn Service<T>>,
         sender: Sender<Event<T>>,
@@ -454,14 +501,23 @@ impl<T: ThreadSafeIsh> Handler<T> {
         }
         println!("LOG:{:#?}", i.get_type());
         match i {
-            Event::CreateSubscriber(event_sub) => {
-                self.create_subscriber(event_sub, self.sender.clone()).await;
+            Event::CreateSubscriber(event_sub,high_priority) => {
+                if high_priority{
+                    self.create_subscriber_high_priority(event_sub, self.sender.clone()).await;
+                }else{
+                    self.create_subscriber(event_sub, self.sender.clone()).await;
+                }
+
             }
             Event::DestroySubscriber { id } => {
                 self.destroy_subscriber(id).await;
             }
-            Event::CreateService(service) => {
-                self.create_service(service, self.sender.clone()).await;
+            Event::CreateService(service,high_priority) => {
+                if high_priority{
+                    self.create_service_high_priority(service, self.sender.clone()).await; 
+                }else{
+                    self.create_service(service, self.sender.clone()).await;
+                }
             }
             Event::DestroyService { id } => {
                 self.destroy_service(id).await;
@@ -602,7 +658,7 @@ impl<T: ThreadSafeIsh> EventSync<T> {
         Ok(())
     }
 
-    pub async fn create_new_subscriber<Sub: EventSub<T> + 'static>(
+    pub fn create_new_subscriber<Sub: EventSub<T> + 'static>(
         &self,
         subscriber: Sub,
     ) -> Result<(), Box<dyn Error>> {
@@ -610,8 +666,101 @@ impl<T: ThreadSafeIsh> EventSync<T> {
         self.sender
             .as_ref()
             .unwrap()
-            .send(Event::CreateSubscriber(bx))?;
+            .send(Event::CreateSubscriber(bx,false))?;
         Ok(())
+    }
+
+    pub fn create_new_service<Serv:Service<T>+ 'static>(
+        &self,
+        service:Serv
+    ) -> Result<(), Box<dyn Error>> {
+        let bx = Box::new(service) as Box<dyn Service<T>>;
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::CreateService(bx,false))?;
+        Ok(())
+    }
+
+    pub fn create_new_service_high_priority<Serv:Service<T>+ 'static>(
+        &self,
+        service:Serv
+    ) -> Result<(), Box<dyn Error>> {
+        let bx = Box::new(service) as Box<dyn Service<T>>;
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(Event::CreateService(bx,true))?;
+        Ok(())
+    }
+
+    pub fn destroy_subscriber(&self, id:SubId)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::DestroySubscriber { id })?;
+        Ok(())
+    }
+
+    pub fn destroy_service(&self, id:ServiceId)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::DestroyService { id })?;
+        Ok(())
+    } 
+
+    pub fn tcp_connection(&self, stream:TcpStream, id:TcpConnectionId)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::TcpConnection {stream, id })?;
+        Ok(())
+    }
+
+    pub fn new_tcp_connection(&self, id:TcpConnectionId)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::NotifyNewTcpConnection { id })?;
+        Ok(())
+    }
+
+    pub fn tcp_disconnect(&self, id:TcpConnectionId)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::NotifyNewTcpConnection { id })?;
+        Ok(())
+    }
+
+    pub fn net_input(&self, id:TcpConnectionId, data:Arc<[u8]>)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::NetInput { id, data })?;
+        Ok(())
+    }
+
+    pub fn http_request(&self, id:TcpConnectionId, request:HTTPRequest)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::HttpRequest { id, request })?;
+        Ok(())
+    }
+
+    pub fn http_response(&self, id:TcpConnectionId, response:HTTPResponse)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::HttpResponse { id, response })?;
+        Ok(())
+    }
+
+    pub fn net_output(&self,id:TcpConnectionId, data:Arc<[u8]>)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::NetOutput { id, data})?;
+        Ok(()) 
+    }
+    pub fn create_daemon(&self, daemon:Box<dyn Daemon>, id:DaemonId)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::CreateDaemon { daemon, id })?;
+        Ok(())
+    }
+
+    pub fn kill_daemon(&self, to_kill:DaemonId)->Throws<()>{
+        self.sender.as_ref().unwrap().send(Event::RequestDaemonKill { id: to_kill})?;
+        Ok(()) 
+    }
+
+    pub fn kill_connection(&self, to_kill:TcpConnectionId)->Throws<()>{
+           self.sender.as_ref().unwrap().send(Event::RequestConnectionKill { id: to_kill})?;
+        Ok(())  
+    }
+
+    pub fn kill_service(&self, to_kill:ServiceId)->Throws<()>{
+           self.sender.as_ref().unwrap().send(Event::RequestServiceKill { id: to_kill})?;
+        Ok(())  
+    }
+        
+    pub fn kill_subscriber(&self, to_kill:SubId)->Throws<()>{
+           self.sender.as_ref().unwrap().send(Event::RequestSubscriberKill { id: to_kill})?;
+        Ok(())  
     }
 
     pub fn invalid() -> Self {
@@ -746,7 +895,7 @@ impl<T: ThreadSafeIsh + Clone> EventForwarder<T> {
             self_id: SubId::invalid(),
             sender: EventSync::invalid(),
         };
-        sync.create_new_subscriber(this).await.unwrap();
+        sync.create_new_subscriber(this).unwrap();
         out_pipe
     }
 
@@ -766,7 +915,7 @@ impl<T: ThreadSafeIsh + Clone> EventForwarder<T> {
             self_id: SubId::invalid(),
             sender: EventSync::invalid(),
         };
-        sync.create_new_subscriber(this).await.unwrap();
+        sync.create_new_subscriber(this).unwrap();
         out_pipe
     }
 
@@ -785,7 +934,7 @@ impl<T: ThreadSafeIsh + Clone> EventForwarder<T> {
             self_id: SubId::invalid(),
             sender: EventSync::invalid(),
         };
-        sync.create_new_subscriber(this).await.unwrap();
+        sync.create_new_subscriber(this).unwrap();
         (out_pipe, out_events)
     }
 }
@@ -837,12 +986,14 @@ pub struct IdAllocator {
     al: Mutex<IdAllocatorInternal>,
 }
 impl IdAllocator {
-    pub fn alloc_general(&self) -> u64 {
-        self.al.lock().unwrap().alloc_general()
+    pub fn alloc(&self) -> u64 {
+        self.al.lock().unwrap().alloc()
     }
-
-    pub fn free_general(&self, id: u64) {
-        self.al.lock().unwrap().free_general(id)
+    pub fn alloc_high_priority(&self) -> u64 {
+        self.al.lock().unwrap().alloc_high_priority()
+    }
+    pub fn free(&self, id: u64) {
+        self.al.lock().unwrap().free(id)
     }
 }
 
@@ -860,7 +1011,21 @@ impl IdAllocatorInternal {
         }
     }
 
-    pub fn alloc_general(&mut self) -> u64 {
+    pub fn alloc(&mut self) -> u64 {
+        let mut min = 2048;
+        for i in 2048..=u64::MAX {
+            min = i;
+            if !self.general_ids.contains(&i) {
+                break;
+            }
+        }
+        if min == u64::MAX {
+            panic!()
+        }
+        self.general_ids.insert(min);
+        min
+    }
+    pub fn alloc_high_priority(&mut self) -> u64 {
         let mut min = 1;
         for i in 1..=u64::MAX {
             min = i;
@@ -874,7 +1039,7 @@ impl IdAllocatorInternal {
         self.general_ids.insert(min);
         min
     }
-    pub fn free_general(&mut self, id: u64) {
+    pub fn free(&mut self, id: u64) {
         self.general_ids.remove(&id);
     }
 }

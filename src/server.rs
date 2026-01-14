@@ -1,9 +1,9 @@
-use std::{collections::{BTreeMap, HashSet}, ffi::OsStr, net::IpAddr, path::Path, sync::Arc, task::Context, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}};
 
-use crate::{Exception, Throw, Throws, events::{BPipe, Daemon, DaemonId, Event, EventForwarder, EventHandler, EventSync, EventType, IDS, TcpConnectionId, ThreadSafeIsh}, throw};
+use crate::{Exception, Throw, Throws, events::{BPipe, Daemon, DaemonId, Event, EventForwarder, EventHandler, EventSync, EventType,  TcpConnectionId, ThreadSafeIsh}, throw};
 /*
 * HTTP request enum, we will accept a body in any request for compatability with dumbshit because I
 * am a good girl
@@ -152,7 +152,6 @@ pub async fn http_get_request(stream: &mut TcpStream) -> Throws<HTTPRequest> {
         continue;
     }
     let cmd = args.next().throw()?;
-    println!("CMD:{}", cmd);
     match cmd {
         "GET" => {
             return http_parse_get(header_string, stream).await;
@@ -245,7 +244,6 @@ pub async fn http_parse_post(header_string: &str, stream: &mut TcpStream) -> Thr
     let target = l1.next().throw()?;
     assert!(x == "POST");
     let mut cl = 0;
-    println!("LOG:POST TARGET:{:#?}", target);
     loop {
         let s = read_line(stream).await?;
         let s = str::from_utf8(&s)?.trim();
@@ -373,7 +371,7 @@ pub struct HttpServer<T:ThreadSafeIsh>{
     events:EventSync<T>,
     listener:TcpListener,
     config:HttpConfig,
-    forwarder:BPipe<T>,
+    _forwarder:BPipe<T>,
 }
 
 #[async_trait]
@@ -412,16 +410,18 @@ impl<T:ThreadSafeIsh+Clone> HttpServer<T>{
             true
         } ,events.clone()).await;
         let listener = TcpListener::bind(addr).await?;
-        Ok(Self {events, listener ,config, forwarder})
+        Ok(Self {events, listener ,config, _forwarder:forwarder})
     }
+    
     pub async fn update(&mut self){
         
     }
+
     pub async fn run_tcp_connection(con:TcpStream, con_id:TcpConnectionId,addr:std::net::SocketAddr, sync:EventSync<T>, config:HttpConfig){ 
         _= addr;
         let events = EventForwarder::new_globals(|f|{
             let tmp = f.get_type();
-            tmp == EventType::HttpResponse  || tmp ==EventType::NetOutput || tmp == EventType::NetInput
+            tmp == EventType::HttpResponse  || tmp ==EventType::NetOutput || tmp == EventType::NetInput || tmp == EventType::NotifyNewTcpConnection
         },sync.clone()).await;
         let mut handler = TcpHandler{events, stream:con, con_id, config, sync:sync.clone()};
         handler.run().await;
@@ -441,6 +441,7 @@ impl<T:ThreadSafeIsh+Clone> TcpHandler<T>{
             let Some(ev )= self.events.recieve().unwrap()else {
                 break;
             };
+          //  println!("event:{:#?}", ev.get_type());
             match ev{
                 Event::HttpResponse { id, response }=>{
                    if id == self.con_id{
@@ -452,13 +453,17 @@ impl<T:ThreadSafeIsh+Clone> TcpHandler<T>{
                         self.stream.write(&data).await?;
                     }
                 }
+                Event::NotifyNewTcpConnection { id }=>{
+                        println!("cond_id:{},noted the creation of:{}", self.con_id.inner(),id.inner()); 
+                }
                 _=>{
-                    todo!()
+                    println!("cond_id:{},unhandled event:{:#?}", self.con_id.inner(),ev.get_type());
                 }
             } 
         }
         Ok(())
     }
+
     async fn run(&mut self){ 
         loop{
             let _e = self.poll_events().await;
@@ -475,8 +480,8 @@ impl<T:ThreadSafeIsh+Clone> TcpHandler<T>{
             }
         }
     }
+
     async fn handle_request(&mut self, req:HTTPRequest)->Throws<()>{
-        println!("LOG:{:#?}", req);
         match &req{
             HTTPRequest::Get { target, msg:_ } => {
                 if self.config.handle_gets_locally{
