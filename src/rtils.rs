@@ -5,6 +5,7 @@ pub mod rtils_useful {
     use std::error::Error;
     use std::fmt::Display;
 
+    use std::io::{Read, Write};
     use std::str::FromStr;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
@@ -844,4 +845,57 @@ pub mod rtils_useful {
             self.done.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
+    pub fn stream_write_bytes(stream: &mut std::net::TcpStream, bytes: &[u8]) -> Throws<()> {
+        let blen = (bytes.len() as u64).to_le_bytes();
+        stream.write(&blen)?;
+        stream.write(bytes)?;
+        Ok(())
+    }
+    pub fn stream_try_read_bytes(stream: &mut std::net::TcpStream) -> Throws<Option<Vec<u8>>> {
+        stream.set_nonblocking(true)?;
+        let mut bytes = [0; 8];
+        let e = stream.read_exact(&mut bytes);
+        if let Err(e) = e {
+            match e.kind() {
+                std::io::ErrorKind::WouldBlock => {
+                    return Ok(None);
+                }
+                _ => {
+                    throw!(e);
+                }
+            }
+        }
+        let len = u64::from_le_bytes(bytes);
+        let mut buf = Vec::new();
+        for _ in 0..len {
+            buf.push(0_u8);
+        } 
+        stream.set_nonblocking(false)?;
+        let e = stream.read_exact(&mut buf);
+        stream.set_nonblocking(true)?;
+        if let Err(e) = e{
+            throw!(e);
+        }
+        Ok(Some(buf))
+    } 
+    pub fn stream_read_bytes_blocking(stream: &mut std::net::TcpStream) -> Throws<Option<Vec<u8>>> {
+        stream.set_nonblocking(false)?;
+        let mut bytes = [0; 8];
+        let e = stream.read_exact(&mut bytes);
+        if let Err(e) = e{
+            stream.set_nonblocking(true)?;
+            throw!(e);
+        }
+        let len = u64::from_le_bytes(bytes);
+        let mut buf = Vec::new();
+        for _ in 0..len {
+            buf.push(0_u8);
+        } 
+        let e = stream.read_exact(&mut buf);
+        stream.set_nonblocking(true)?;
+        if let Err(e) = e{
+            throw!(e);
+        }
+        Ok(Some(buf))
+    } 
 }
