@@ -8,7 +8,10 @@ pub mod rtils_useful {
     use std::io::{Read, Write};
     use std::str::FromStr;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, RwLock};
+    use std::thread::yield_now;
+
+    use serde::{Deserialize, Serialize};
     pub trait CopyFromStr {
         fn copy_from_str(&mut self, string: &str) -> bool;
     }
@@ -65,14 +68,14 @@ pub mod rtils_useful {
                             argument.push(j.unwrap());
                         }
                     }
-                    if let Some(e) = end_delim {
-                        if e == '{' || e == '}' {
-                            let Some(n) = fmt.next() else {
-                                return false;
-                            };
-                            if n != e {
-                                return false;
-                            }
+                    if let Some(e) = end_delim
+                        && (e == '{' || e == '}')
+                    {
+                        let Some(n) = fmt.next() else {
+                            return false;
+                        };
+                        if n != e {
+                            return false;
                         }
                     }
                     if args_index >= args.len() {
@@ -101,22 +104,20 @@ pub mod rtils_useful {
                 if j != '}' {
                     return false;
                 }
-            } else {
-                if i != j {
-                    return false;
-                }
+            } else if i != j {
+                return false;
             }
             if done {
                 break;
             }
         }
-        if let Some(_) = inp.next() {
+        if inp.next().is_some() {
             return false;
         }
         if args_index != args.len() {
             return false;
         }
-        return true;
+        true
     }
     mod rtils {
         #[allow(unused)]
@@ -268,7 +269,7 @@ pub mod rtils_useful {
     (try $block:block catch ($err:ident) $if_err:block) => {
         {
 
-        let f =|| {
+        let mut f =|| {
             $block
             #[allow(unused)]
             Ok::<(), Exception>(())
@@ -706,8 +707,8 @@ pub mod rtils_useful {
                     }
                 }
             }
-            let out = Out { v: self.v.clone() };
-            out
+
+            Out { v: self.v.clone() }
         }
 
         pub fn write(self, v: T) {
@@ -744,7 +745,6 @@ pub mod rtils_useful {
         }
     }
 
-    #[derive(Clone)]
     pub struct BPipe<T> {
         sending: Arc<Mutex<VecDeque<T>>>,
         recieving: Arc<Mutex<VecDeque<T>>>,
@@ -769,7 +769,7 @@ pub mod rtils_useful {
         }
 
         pub fn send(&self, v: T) -> Throws<()> {
-            if self.done.load(std::sync::atomic::Ordering::Relaxed) {
+            if self.done.load(std::sync::atomic::Ordering::Acquire) {
                 return Err("done".into());
             }
             let mut sending = self.sending.lock().unwrap();
@@ -778,22 +778,31 @@ pub mod rtils_useful {
         }
 
         pub fn recieve(&self) -> Throws<Option<T>> {
-            if self.done.load(std::sync::atomic::Ordering::Relaxed) {
+            if self.done.load(std::sync::atomic::Ordering::Acquire) {
                 todo!()
             }
             let mut recieving = self.recieving.lock().unwrap();
             Ok(recieving.pop_front())
         }
 
+        pub fn receive_buffer(&self) -> Throws<Vec<T>> {
+            let mut out = Vec::new();
+            while let Some(x) = self.recieve()? {
+                out.push(x);
+            }
+            Ok(out)
+        }
+
         pub fn recieve_wait(&self) -> Throws<T> {
             loop {
-                if self.done.load(std::sync::atomic::Ordering::Relaxed) {
+                if self.done.load(std::sync::atomic::Ordering::Acquire) {
                     return Err("done".into());
                 }
                 let mut recieving = self.recieving.lock().unwrap();
                 if let Some(x) = recieving.pop_front() {
                     return Ok(x);
                 }
+                yield_now();
             }
         }
 
@@ -808,7 +817,7 @@ pub mod rtils_useful {
                     self: std::pin::Pin<&mut Self>,
                     _cx: &mut std::task::Context<'_>,
                 ) -> std::task::Poll<Self::Output> {
-                    if self.done.load(std::sync::atomic::Ordering::Relaxed) {
+                    if self.done.load(std::sync::atomic::Ordering::Acquire) {
                         return std::task::Poll::Ready(Err::<T, Exception>("done".into()));
                     }
                     let tmp = self.reciever.try_lock();
@@ -840,17 +849,30 @@ pub mod rtils_useful {
             }
         }
     }
-    impl<T> Drop for BPipe<T> {
-        fn drop(&mut self) {
-            self.done.store(true, std::sync::atomic::Ordering::Relaxed);
+    impl<T> Iterator for BPipe<T> {
+        type Item = Throws<T>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let tmp = self.recieve();
+            match tmp {
+                Err(e) => Some(Err(e)),
+                Ok(x) => x.map(Ok),
+            }
         }
     }
+    impl<T> Drop for BPipe<T> {
+        fn drop(&mut self) {
+            self.done.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
     pub fn stream_write_bytes(stream: &mut std::net::TcpStream, bytes: &[u8]) -> Throws<()> {
         let blen = (bytes.len() as u64).to_le_bytes();
         stream.write(&blen)?;
         stream.write(bytes)?;
         Ok(())
     }
+
     pub fn stream_try_read_bytes(stream: &mut std::net::TcpStream) -> Throws<Option<Vec<u8>>> {
         stream.set_nonblocking(true)?;
         let mut bytes = [0; 8];
@@ -869,20 +891,21 @@ pub mod rtils_useful {
         let mut buf = Vec::new();
         for _ in 0..len {
             buf.push(0_u8);
-        } 
+        }
         stream.set_nonblocking(false)?;
         let e = stream.read_exact(&mut buf);
         stream.set_nonblocking(true)?;
-        if let Err(e) = e{
+        if let Err(e) = e {
             throw!(e);
         }
         Ok(Some(buf))
-    } 
-    pub fn stream_read_bytes_blocking(stream: &mut std::net::TcpStream) -> Throws<Option<Vec<u8>>> {
+    }
+
+    pub fn stream_read_bytes_blocking(stream: &mut std::net::TcpStream) -> Throws<Vec<u8>> {
         stream.set_nonblocking(false)?;
         let mut bytes = [0; 8];
         let e = stream.read_exact(&mut bytes);
-        if let Err(e) = e{
+        if let Err(e) = e {
             stream.set_nonblocking(true)?;
             throw!(e);
         }
@@ -890,12 +913,249 @@ pub mod rtils_useful {
         let mut buf = Vec::new();
         for _ in 0..len {
             buf.push(0_u8);
-        } 
+        }
         let e = stream.read_exact(&mut buf);
         stream.set_nonblocking(true)?;
-        if let Err(e) = e{
+        if let Err(e) = e {
             throw!(e);
         }
-        Ok(Some(buf))
-    } 
+        Ok(buf)
+    }
+
+    #[repr(transparent)]
+    #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+    pub struct Immutable<T> {
+        x: T,
+    }
+    impl<T> Immutable<T> {
+        pub fn new(x: T) -> Self {
+            Self { x }
+        }
+        pub fn get(&self) -> &T {
+            &self.x
+        }
+        pub unsafe fn get_mut(&mut self) -> &mut T {
+            &mut self.x
+        }
+        pub fn take(self) -> T {
+            self.x
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct Token {
+        pub text: String,
+        pub file: String,
+        pub line: usize,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct TokenStream {
+        pub tokens: Vec<Token>,
+        pub index: usize,
+    }
+
+    impl AsRef<str> for Token {
+        fn as_ref(&self) -> &str {
+            &self.text
+        }
+    }
+
+    impl TokenStream {
+        pub fn from_string(s: String, file: String) -> Self {
+            let tokens = tokenize(s, file);
+            Self { tokens, index: 0 }
+        }
+        pub fn peek(&self) -> Option<Token> {
+            let mut t = self.clone();
+            t.next()
+        }
+        pub fn insert_next(&mut self, t: Token) {
+            self.tokens.insert(self.index, t);
+        }
+    }
+
+    impl Iterator for TokenStream {
+        type Item = Token;
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.index < self.tokens.len() {
+                let out = self.tokens[self.index].clone();
+                self.index += 1;
+                Some(out)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn tokenize(s: String, file: String) -> Vec<Token> {
+        enum State {
+            Whitespace,
+            Ident,
+            String,
+            Comment,
+            StringEscaped,
+        }
+        let mut out = Vec::new();
+        let mut buf = String::new();
+        let mut line = 1;
+        let mut state = State::Whitespace;
+        for c in s.chars() {
+            match state {
+                State::Whitespace => {
+                    if c == ' ' || c == '\t' {
+                    } else if c == '\n' {
+                        line += 1;
+                    } else if c == ':'
+                        || c == '+'
+                        || c == '-'
+                        || c == '*'
+                        || c == '/'
+                        || c == '('
+                        || c == ')'
+                        || c == '<'
+                        || c == '>'
+                    {
+                        out.push(Token {
+                            text: c.to_string(),
+                            file: file.clone(),
+                            line,
+                        });
+                    } else if c == '"' {
+                        buf = String::new();
+                        state = State::String;
+                    } else if c == ';' {
+                        buf = String::new();
+                        state = State::Comment;
+                    } else {
+                        buf = String::new();
+                        buf.push(c);
+                        state = State::Ident;
+                    }
+                }
+                State::Ident => {
+                    if !c.is_whitespace()
+                        && !(c == ':'
+                            || c == '+'
+                            || c == '-'
+                            || c == '*'
+                            || c == '/'
+                            || c == ';'
+                            || c == '('
+                            || c == ')'
+                            || c == '>'
+                            || c == '<')
+                    {
+                        buf.push(c);
+                    } else {
+                        out.push(Token {
+                            text: buf,
+                            file: file.clone(),
+                            line,
+                        });
+                        buf = String::new();
+                        if c == '\n' {
+                            line += 1;
+                        } else if c == ':'
+                            || c == '+'
+                            || c == '-'
+                            || c == '*'
+                            || c == '/'
+                            || c == '('
+                            || c == ')'
+                            || c == '>'
+                            || c == '<'
+                        {
+                            out.push(Token {
+                                text: c.to_string(),
+                                file: file.clone(),
+                                line,
+                            });
+                        }
+                        state = if c == ';' {
+                            State::Comment
+                        } else {
+                            State::Whitespace
+                        };
+                    }
+                }
+                State::String => {
+                    if c == '"' {
+                        buf = "\"".to_string() + &buf + "\"";
+                        out.push(Token {
+                            text: buf,
+                            file: file.clone(),
+                            line,
+                        });
+                        buf = String::new();
+                        state = State::Whitespace;
+                    } else if c == '\\' {
+                        state = State::StringEscaped;
+                    } else if c == '\n' {
+                        line += 1;
+                    } else {
+                        buf.push(c);
+                    }
+                }
+                State::StringEscaped => {
+                    buf.push(c);
+                    state = State::String;
+                }
+                State::Comment => {
+                    if c == '\n' {
+                        line += 1;
+                        state = State::Whitespace
+                    }
+                }
+            }
+        }
+        if !buf.is_empty() {
+            out.push(Token {
+                text: buf,
+                file,
+                line,
+            });
+        }
+        //println!("{:#?}", out);
+        out
+    }
+
+    pub struct Shared<T> {
+        inner: Arc<RwLock<T>>,
+    }
+    impl<T> Shared<T> {
+        pub fn new(value: T) -> Self {
+            Self {
+                inner: Arc::new(RwLock::new(value)),
+            }
+        }
+        pub fn shared_store_copy(&self, v: T) {
+            *self.inner.write().unwrap() = v;
+        }
+    }
+    impl<T: Clone> Shared<T> {
+        pub fn shared_get_copy(&self) -> T {
+            self.inner.read().unwrap().clone()
+        }
+    }
+
+    #[macro_export]
+    macro_rules! make_shared_type {
+    ($T:ty, $((fn $name:ident(&mut self$(,)? $($arg:ident:$ty:ty$(,)?)*)->$returns:ty))* , $((fn $const_name:ident(& self$(,)? $($const_arg:ident:$const_ty:ty$(,)?)*)->$const_returns:ty))*)=> {
+        impl Shared<$T>{
+            $(
+                pub fn $name(&self, $($arg:$ty)*)->$returns{
+                    let mut lock = self.inner.write().unwrap();
+                    lock.$name($($arg,)*)
+                }
+            )*
+            $(
+                pub fn $const_name(&self, $($const_arg:$const_ty)*)->$const_returns{
+                    let lock = self.inner.read().unwrap();
+                    lock.$const_name($($const_arg,)*)
+                }
+            )*
+        }
+    };
+}
 }
