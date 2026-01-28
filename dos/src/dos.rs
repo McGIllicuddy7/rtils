@@ -1,7 +1,12 @@
 use raylib::prelude::*;
 pub use serde::{Deserialize, Serialize};
 pub use std::sync::Arc;
-use std::{collections::BTreeMap, error::Error, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    error::Error,
+    hash::Hash,
+    time::Duration,
+};
 
 use crate::rtils::rtils_useful::{Arena, BPipe};
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -154,6 +159,7 @@ pub enum DrawCall {
     },
     DrawPixels {
         points: Vec<(Pos2, BColor)>,
+        width: f32,
     },
     DrawText {
         x: i32,
@@ -221,6 +227,8 @@ pub struct UserInput {
     right_mouse_pressed: bool,
     left_mouse_released: bool,
     right_mouse_released: bool,
+    left_arrow_pressed: bool,
+    right_arrow_pressed: bool,
 }
 impl UserInput {
     pub fn new() -> Self {
@@ -236,6 +244,8 @@ impl UserInput {
             right_mouse_pressed: false,
             left_mouse_released: false,
             right_mouse_released: false,
+            right_arrow_pressed: false,
+            left_arrow_pressed: false,
             scroll_amount: 0,
         };
         inp
@@ -246,6 +256,8 @@ impl UserInput {
         self.left_mouse_released = false;
         self.right_mouse_released = false;
         self.right_mouse_pressed = false;
+        self.right_arrow_pressed = false;
+        self.left_arrow_pressed = false;
         self.mouse_dx = 0.;
         self.mouse_dy = 0.;
     }
@@ -265,11 +277,14 @@ pub struct SysHandle {
     text_color: BColor,
     background_color: BColor,
     object_color: BColor,
+    object_pressed_color: BColor,
     shadows: bool,
     outline: bool,
     user_input: UserInput,
     should_exit: bool,
     queue: Vec<DrawCall>,
+    text_box_data: HashMap<String, TextBoxData>,
+    scroll_box_data: HashMap<String, f32>,
 }
 pub fn text_ratios(handle: &RaylibHandle) -> (f64, BTreeMap<char, f64>) {
     let mut out = BTreeMap::new();
@@ -280,7 +295,7 @@ pub fn text_ratios(handle: &RaylibHandle) -> (f64, BTreeMap<char, f64>) {
         if !c.is_control() {
             text.push(c);
             let mes = handle.measure_text(&text, 10);
-            let xs = mes as f64 / 10.0;
+            let xs = (mes as f64 + 1.) / 10.0;
             if xs > max {
                 max = xs;
             }
@@ -289,6 +304,24 @@ pub fn text_ratios(handle: &RaylibHandle) -> (f64, BTreeMap<char, f64>) {
         }
     }
     (max, out)
+}
+
+#[derive(Clone)]
+pub struct TextBoxData {
+    pub selected: bool,
+    pub text: String,
+    pub cursor: usize,
+    pub selected_section: Option<(usize, usize)>,
+}
+impl TextBoxData {
+    pub fn new() -> Self {
+        Self {
+            selected: false,
+            text: String::new(),
+            cursor: 0,
+            selected_section: None,
+        }
+    }
 }
 impl SysHandle {
     pub fn should_exit(&self) -> bool {
@@ -320,6 +353,84 @@ impl SysHandle {
         }
     }
 
+    pub fn char_location(
+        &self,
+        index: usize,
+        x: i32,
+        y: i32,
+        text: &str,
+        text_height: i32,
+        max_w: i32,
+    ) -> Pos2 {
+        let mut cx = x;
+        let mut cy = y;
+        let mut id = 0;
+        for i in text.chars() {
+            if i == '\r' {
+                cx = x;
+            } else if i == '\n' {
+                cx = x;
+                cy += text_height;
+            } else {
+                let wp = self.char_width(i, text_height).unwrap();
+                if cx + wp >= max_w + x {
+                    cx = x + wp;
+                    cy += text_height;
+                } else {
+                    if id == index {
+                        return Pos2 { x: cx, y: cy };
+                    }
+                    cx += wp;
+                }
+            }
+
+            id += 1;
+        }
+        return Pos2 { x: cx, y: cy };
+    }
+    pub fn nearest_char_to(
+        &self,
+        pos_x: i32,
+        pos_y: i32,
+        x: i32,
+        y: i32,
+        text: &str,
+        text_height: i32,
+        max_w: i32,
+    ) -> usize {
+        if text.is_empty() {
+            return 0;
+        }
+        let mut cx = x;
+        let mut cy = y;
+        let mut id = 0;
+        let mut min_id = text.len() - 1;
+        let mut min_dist = 100000;
+        for i in text.chars() {
+            if i == '\r' {
+                cx = x;
+            } else if i == '\n' {
+                cx = x;
+                cy += text_height;
+            } else {
+                let wp = self.char_width(i, text_height).unwrap();
+                if cx + wp >= max_w + x {
+                    cx = x + wp;
+                    cy += text_height;
+                } else {
+                    cx += wp;
+                }
+            }
+            let dist = (pos_y - cy) * (pos_y - cy) + (pos_x - cx) * (pos_x - cx);
+            if dist < min_dist {
+                min_id = id;
+                min_dist = dist;
+            }
+            id += 1;
+        }
+        min_id
+    }
+
     pub fn split_by_required_line(&self, text: &str, h: i32, max_w: i32) -> Vec<String> {
         let mut out = Vec::new();
         let mut current = String::new();
@@ -335,9 +446,7 @@ impl SysHandle {
                 current = String::new();
                 w = 0;
             } else {
-                let mut txt = [0; 8];
-                let utf = i.encode_utf8(&mut txt);
-                let wp = self.measure_text(utf, h).unwrap();
+                let wp = self.char_width(i, h).unwrap();
                 if w + wp >= max_w {
                     w = wp;
                     out.push(current);
@@ -515,7 +624,7 @@ impl SysHandle {
         self.draw_sprite_exp(self.padding_x, self.padding_y, w, h, sprite)
     }
 
-    pub fn draw_pixels(&mut self, points: Vec<(Pos2, BColor)>) {
+    pub fn draw_pixels(&mut self, points: Vec<(Pos2, BColor)>, width: f32) {
         if points.len() == 0 {
             return;
         }
@@ -539,7 +648,10 @@ impl SysHandle {
                 max.y = x.y;
             }
         });
-        self.queue.push(DrawCall::DrawPixels { points: mpoints });
+        self.queue.push(DrawCall::DrawPixels {
+            points: mpoints,
+            width,
+        });
         let w = max.x - min.x;
         let h = max.y - min.y;
         self.update_cursor(Rect {
@@ -561,12 +673,21 @@ impl SysHandle {
         let (mut h, texts) = self.text_get_height_and_lines(text, text_height, w - 5);
         h += 10;
         let pos = self.get_absolute_pos(Pos2 { x: x, y: y });
+        let did_hit = self.user_input.mouse_x >= pos.x
+            && self.user_input.mouse_y >= pos.y
+            && self.user_input.mouse_x < pos.x + w
+            && self.user_input.mouse_y < pos.y + h;
+        let col = if did_hit && self.user_input.left_mouse_down {
+            self.object_pressed_color
+        } else {
+            self.object_color
+        };
         self.queue.push(DrawCall::Rectangle {
             x: pos.x,
             y: pos.y,
             w,
             h,
-            color: self.object_color,
+            color: col,
             drop_shadow: self.shadows,
             outline: self.outline,
         });
@@ -709,8 +830,8 @@ impl SysHandle {
         let strings: Vec<String> = objects
             .iter()
             .flat_map(|i| {
-                let (dh, cons) = self.text_get_height_and_lines(&as_string(i), text_height, w - 7);
-                height += dh;
+                let (dh, cons) = self.text_get_height_and_lines(&as_string(i), text_height, w - 10);
+                height += dh + 10;
                 cons
             })
             .collect();
@@ -774,6 +895,23 @@ impl SysHandle {
             drop_shadow: false,
             outline: true,
         });
+        self.queue.push(DrawCall::DrawPixels {
+            points: vec![
+                (
+                    Pos2 { x: bx.x, y: base.y },
+                    BColor::from_rl_color(Color::DARKGRAY),
+                ),
+                (
+                    Pos2 {
+                        x: bx.x,
+                        y: base.y + h,
+                    },
+                    BColor::from_rl_color(Color::DARKGRAY),
+                ),
+            ],
+            width: 1.0,
+        });
+
         self.queue.push(DrawCall::EndScissor);
         let hovered = self.user_input.mouse_x >= base.x
             && self.user_input.mouse_y >= base.y
@@ -792,7 +930,7 @@ impl SysHandle {
                 y: self.user_input.mouse_y,
             })
         {
-            out += self.user_input.mouse_dy as f32 / h as f32 * 2.0;
+            out += self.user_input.mouse_dy as f32 / h as f32 * 1.5;
         } else if hovered {
             out -= self.user_input.scroll_amount as f32 / h as f32;
         }
@@ -805,6 +943,7 @@ impl SysHandle {
         });
         out.clamp(0.0, 1.)
     }
+
     pub fn draw_button_scroll_box_exp<'a, T>(
         &mut self,
         x: i32,
@@ -822,7 +961,7 @@ impl SysHandle {
         let strings: Vec<(i32, Vec<String>)> = objects
             .iter()
             .map(|i| {
-                let (dh, cons) = self.text_get_height_and_lines(&as_string(i), text_height, w - 17);
+                let (dh, cons) = self.text_get_height_and_lines(&as_string(i), text_height, w - 10);
                 height += dh + 10;
                 (dh + 5, cons)
             })
@@ -857,12 +996,21 @@ impl SysHandle {
                 y: y as i32,
             };
             if !(y as i32 + (i.0 as i32) < base.y || (y as i32) > base.y + h) {
+                let did_hit = self.user_input.mouse_x >= pos.x
+                    && self.user_input.mouse_y >= pos.y
+                    && self.user_input.mouse_x < pos.x + w
+                    && self.user_input.mouse_y < pos.y + i.0;
+                let col = if did_hit && self.user_input.left_mouse_down {
+                    self.object_pressed_color
+                } else {
+                    self.object_color
+                };
                 self.queue.push(DrawCall::Rectangle {
                     x: pos.x,
                     y: pos.y,
-                    w: w - 17,
+                    w: w - 11,
                     h: i.0,
-                    color: self.object_color,
+                    color: col,
                     drop_shadow: self.shadows,
                     outline: self.outline,
                 });
@@ -879,12 +1027,8 @@ impl SysHandle {
                     });
                     current.y += text_height;
                 }
-                let did_hit = self.user_input.mouse_x >= pos.x
-                    && self.user_input.mouse_y >= pos.y
-                    && self.user_input.mouse_x < pos.x + w
-                    && self.user_input.mouse_y < pos.y + h
-                    && self.user_input.left_mouse_released;
-                if did_hit {
+
+                if did_hit && self.user_input.left_mouse_released {
                     hit = Some(idx);
                 }
             }
@@ -893,7 +1037,6 @@ impl SysHandle {
             } else {
                 y -= i.0 as f32 + 5.0;
             }
-
             idx += 1;
         }
         let bx = Rect {
@@ -911,13 +1054,28 @@ impl SysHandle {
             drop_shadow: false,
             outline: true,
         });
+        self.queue.push(DrawCall::DrawPixels {
+            points: vec![
+                (
+                    Pos2 { x: bx.x, y: base.y },
+                    BColor::from_rl_color(Color::DARKGRAY),
+                ),
+                (
+                    Pos2 {
+                        x: bx.x,
+                        y: base.y + h,
+                    },
+                    BColor::from_rl_color(Color::DARKGRAY),
+                ),
+            ],
+            width: 1.0,
+        });
         self.queue.push(DrawCall::EndScissor);
         let hovered = self.user_input.mouse_x >= base.x
             && self.user_input.mouse_y >= base.y
             && self.user_input.mouse_x < base.x + w
             && self.user_input.mouse_y < base.y + h;
         let mut out = amount;
-
         let bx = Rect {
             x: bx.x - 5,
             y: bx.y - 5,
@@ -930,7 +1088,7 @@ impl SysHandle {
                 y: self.user_input.mouse_y,
             })
         {
-            out += self.user_input.mouse_dy as f32 / h as f32 * 2.0;
+            out += self.user_input.mouse_dy as f32 / h as f32 * 1.5;
         } else if hovered {
             out -= self.user_input.scroll_amount as f32 / h as f32;
         }
@@ -942,6 +1100,229 @@ impl SysHandle {
         });
         (out.clamp(0.0, 1.0), hit)
     }
+
+    pub fn draw_button_scroll_box_saved_exp<T>(
+        &mut self,
+        name: &str,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+    ) -> Option<usize> {
+        let amnt = if let Some(k) = self.scroll_box_data.get(name) {
+            *k
+        } else {
+            self.scroll_box_data.insert(name.to_string(), 0.0);
+            0.0
+        };
+        let (a, x) = self.draw_button_scroll_box_exp(
+            x,
+            y,
+            w,
+            h,
+            text_height,
+            amnt,
+            upside_down,
+            objects,
+            as_string,
+        );
+        *self.scroll_box_data.get_mut(name).unwrap() = a;
+        x
+    }
+
+    pub fn draw_text_scroll_box_saved_exp<T>(
+        &mut self,
+        name: &str,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+    ) {
+        let amnt = if let Some(k) = self.scroll_box_data.get(name) {
+            *k
+        } else {
+            self.scroll_box_data.insert(name.to_string(), 0.0);
+            0.0
+        };
+        let a = self.draw_text_scroll_box_exp(
+            x,
+            y,
+            w,
+            h,
+            text_height,
+            amnt,
+            upside_down,
+            objects,
+            as_string,
+        );
+        *self.scroll_box_data.get_mut(name).unwrap() = a;
+    }
+
+    pub fn text_user_input_exp(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        inp: TextBoxData,
+    ) -> (Option<String>, TextBoxData) {
+        let pos = self.get_absolute_pos(Pos2 { x, y });
+        let bx = Rect {
+            x: pos.x,
+            y: pos.y,
+            w,
+            h,
+        };
+        let mut out_selected = inp.selected;
+        let mut output = inp.text;
+        let mut out_cursor = inp.cursor;
+        let mut selected_section = None;
+        let mut returned = None;
+        if self.user_input.left_mouse_released {
+            if bx.check_collision(Pos2 {
+                x: self.user_input.mouse_x,
+                y: self.user_input.mouse_y,
+            }) {
+                out_selected = true;
+            } else {
+                out_selected = false;
+            }
+        }
+        if out_selected {
+            for i in self.user_input.pressed_keys.clone() {
+                if i == '\n' {
+                    returned = Some(output);
+                    output = String::new();
+                } else if i as i32 == 127 {
+                    if out_cursor < output.len() && out_cursor > 0 {
+                        output.remove(out_cursor - 1);
+                        if out_cursor != 0 {
+                            out_cursor -= 1;
+                        }
+                    } else if out_cursor != 0 {
+                        out_cursor -= 1;
+                        output.pop();
+                    }
+                } else {
+                    if out_cursor >= output.len() {
+                        output.push(i);
+                    } else {
+                        output.insert(out_cursor, i);
+                    }
+                    out_cursor += 1;
+                }
+            }
+            if self.user_input.left_arrow_pressed {
+                if out_cursor > 0 {
+                    out_cursor -= 1;
+                }
+            }
+            if self.user_input.right_arrow_pressed {
+                if out_cursor <= output.len() {
+                    out_cursor += 1;
+                }
+            }
+            out_cursor = out_cursor.clamp(0, output.len() + 1);
+        }
+        self.queue.push(DrawCall::Rectangle {
+            x: pos.x,
+            y: pos.y,
+            w,
+            h,
+            color: if out_selected {
+                self.object_pressed_color
+            } else {
+                self.object_color
+            },
+            drop_shadow: self.shadows,
+            outline: self.outline,
+        });
+        self.queue.push(DrawCall::Scissor {
+            x: pos.x,
+            y: pos.y,
+            h,
+            w,
+        });
+        let (th, txt) = self.text_get_height_and_lines(&output, text_height, w - 2);
+        let mut cursor = pos;
+        if th > h {
+            cursor.y -= th - h;
+        }
+        cursor.x += 2;
+        if self.user_input.left_mouse_pressed {
+            let x = self.user_input.mouse_x;
+            let y = self.user_input.mouse_y;
+            let o2 = output.clone() + " ";
+            let id = self.nearest_char_to(x, y, cursor.x, cursor.y, &o2, text_height, w);
+            out_cursor = id;
+        }
+        let lok = self.char_location(out_cursor, cursor.x, cursor.y, &output, text_height, w);
+        self.queue.push(DrawCall::Rectangle {
+            x: lok.x - 2,
+            y: lok.y,
+            w: 2,
+            h: text_height,
+            color: self.text_color,
+            drop_shadow: false,
+            outline: false,
+        });
+        for i in txt {
+            self.queue.push(DrawCall::DrawText {
+                x: cursor.x,
+                y: cursor.y,
+                size: text_height,
+                contents: i,
+                color: self.text_color,
+            });
+            cursor.y += text_height;
+        }
+        self.queue.push(DrawCall::EndScissor);
+        self.update_cursor(Rect {
+            x: pos.x,
+            y: pos.y,
+            w,
+            h,
+        });
+        (
+            returned,
+            TextBoxData {
+                selected: out_selected,
+                text: output,
+                cursor: out_cursor,
+                selected_section,
+            },
+        )
+    }
+
+    pub fn text_user_input_saved_exp(
+        &mut self,
+        name: &str,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text_height: i32,
+    ) -> Option<String> {
+        let data = if let Some(k) = self.text_box_data.get(name) {
+            k.clone()
+        } else {
+            let tmp = TextBoxData::new();
+            self.text_box_data.insert(name.to_string(), tmp.clone());
+            tmp
+        };
+        let (out, d2) = self.text_user_input_exp(x, y, w, h, text_height, data);
+        *self.text_box_data.get_mut(name).unwrap() = d2;
+        out
+    }
 }
 
 pub struct Dos {
@@ -950,7 +1331,7 @@ pub struct Dos {
 }
 
 impl Dos {
-    pub fn draw(&mut self, handle: &mut RaylibDrawHandle, thread: &RaylibThread) {
+    pub fn draw(&mut self, handle: &mut RaylibDrawHandle, _thread: &RaylibThread) {
         handle.draw_texture_pro(
             self.render_texture.as_ref().unwrap(),
             Rectangle::new(0.0, 0.0, 640., -480.0),
@@ -1070,6 +1451,22 @@ impl DosRt {
         } else {
             self.input.right_mouse_released = false;
         }
+        if handle.is_key_pressed(KeyboardKey::KEY_BACKSPACE) {
+            self.input.pressed_keys.push(127 as char);
+        }
+        if handle.is_key_pressed(KeyboardKey::KEY_ENTER) {
+            self.input.pressed_keys.push('\n');
+        }
+        if handle.is_key_pressed(KeyboardKey::KEY_LEFT) {
+            self.input.left_arrow_pressed = true;
+        } else {
+            self.input.left_arrow_pressed = false;
+        }
+        if handle.is_key_pressed(KeyboardKey::KEY_RIGHT) {
+            self.input.right_arrow_pressed = true;
+        } else {
+            self.input.right_arrow_pressed = false;
+        }
         self.input.mouse_x = handle.get_mouse_x() / 2;
         self.input.mouse_y = handle.get_mouse_y() / 2;
         let delt = handle.get_mouse_delta();
@@ -1084,7 +1481,7 @@ impl DosRt {
         let mut drw = handle.begin_drawing(thread);
         drw.clear_background(Color::BLACK);
         self.dos.draw(&mut drw, thread);
-        drw.draw_fps(100, 100);
+        //  drw.draw_fps(100, 100);
     }
 
     pub fn run_draw_call<T>(
@@ -1113,9 +1510,17 @@ impl DosRt {
                 }
                 draw.draw_rectangle(x, y, w, h, color.as_rl_color());
             }
-            DrawCall::DrawPixels { points } => {
-                for (p, c) in points {
-                    draw.draw_pixel(p.x, p.y, c.as_rl_color());
+            DrawCall::DrawPixels { points, width } => {
+                for i in 0..points.len() - 1 {
+                    let v1 = points[i].0;
+                    let v2 = points[i + 1].0;
+                    let col = points[i].1;
+                    draw.draw_line_ex(
+                        Vector2::new(v1.x as f32, v1.y as f32),
+                        Vector2::new(v2.x as f32, v2.y as f32),
+                        width,
+                        col.as_rl_color(),
+                    );
                 }
             }
             DrawCall::DrawText {
@@ -1203,6 +1608,8 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         right_mouse_pressed: false,
         left_mouse_released: false,
         right_mouse_released: false,
+        left_arrow_pressed: false,
+        right_arrow_pressed: false,
     };
     let (mut handle, thread) = raylib::init()
         .size(640 * 2, 480 * 2)
@@ -1250,6 +1657,12 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
             b: 64,
             a: 255,
         },
+        object_pressed_color: BColor {
+            r: 48,
+            g: 48,
+            b: 48,
+            a: 255,
+        },
         text_color: BColor {
             r: 192,
             g: 192,
@@ -1259,6 +1672,8 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         user_input: inp,
         shadows: false,
         outline: true,
+        text_box_data: HashMap::new(),
+        scroll_box_data: HashMap::new(),
     };
     let tj = std::thread::spawn(move || fn_main(sys));
     rt.run_loop(handle, thread);
