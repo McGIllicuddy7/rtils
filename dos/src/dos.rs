@@ -247,6 +247,7 @@ pub struct SysHandle {
     outline: bool,
     user_input: UserInput,
     should_exit: bool,
+    queue: Vec<DrawCall>,
 }
 pub fn text_ratios(handle: &RaylibHandle) -> (f64, BTreeMap<char, f64>) {
     let mut out = BTreeMap::new();
@@ -405,7 +406,7 @@ impl SysHandle {
         let base = self.get_absolute_pos(Pos2 { x, y });
         let mut current = base;
         for i in texts {
-            self.handle.send(DrawCall::DrawText {
+            self.queue.push(DrawCall::DrawText {
                 x: current.x,
                 y: current.y,
                 size: h,
@@ -424,7 +425,7 @@ impl SysHandle {
 
     pub fn draw_box(&mut self, x: i32, y: i32, w: i32, h: i32) {
         let base = self.get_absolute_pos(Pos2 { x, y });
-        self.handle.send(DrawCall::Rectangle {
+        self.queue.push(DrawCall::Rectangle {
             x,
             y,
             w,
@@ -443,7 +444,7 @@ impl SysHandle {
 
     pub fn draw_circle(&mut self, x: i32, y: i32, rad: i32) {
         let base = self.get_absolute_pos(Pos2 { x, y });
-        self.handle.send(DrawCall::Circle {
+        self.queue.push(DrawCall::Circle {
             x,
             y,
             rad,
@@ -461,7 +462,7 @@ impl SysHandle {
 
     pub fn draw_sprite(&mut self, x: i32, y: i32, w: i32, h: i32, sprite: Sprite) {
         let base = self.get_absolute_pos(Pos2 { x, y });
-        self.handle.send(DrawCall::DrawSprite {
+        self.queue.push(DrawCall::DrawSprite {
             x,
             y,
             h,
@@ -483,7 +484,6 @@ impl SysHandle {
         mpoints.iter_mut().for_each(|(x, c)| {
             *x = self.get_absolute_pos(*x);
         });
-
         let mut min = mpoints[0].0;
         let mut max = mpoints[0].0;
         mpoints.iter().for_each(|(x, _)| {
@@ -500,7 +500,7 @@ impl SysHandle {
                 max.y = x.y;
             }
         });
-        self.handle.send(DrawCall::DrawPixels { points: mpoints });
+        self.queue.push(DrawCall::DrawPixels { points: mpoints });
         let w = max.x - min.x;
         let h = max.y - min.y;
         self.update_cursor(Rect {
@@ -515,7 +515,7 @@ impl SysHandle {
         let (mut h, texts) = self.text_get_height_and_lines(text, text_height, w - 5);
         h += 10;
         let pos = self.get_absolute_pos(Pos2 { x: x, y: y });
-        self.handle.send(DrawCall::Rectangle {
+        self.queue.push(DrawCall::Rectangle {
             x: pos.x,
             y: pos.y,
             w,
@@ -528,7 +528,7 @@ impl SysHandle {
         current.x += 5;
         current.y += 5;
         for i in texts {
-            self.handle.send(DrawCall::DrawText {
+            self.queue.push(DrawCall::DrawText {
                 x: current.x,
                 y: current.y,
                 size: text_height,
@@ -598,8 +598,9 @@ impl SysHandle {
             }
         }
         self.div_stack.clear();
-        self.handle.send(DrawCall::BeginDrawing);
-        self.handle.send(DrawCall::ClearBackground {
+        self.queue.clear();
+        self.queue.push(DrawCall::BeginDrawing);
+        self.queue.push(DrawCall::ClearBackground {
             color: self.background_color,
         });
         self.cx = 0;
@@ -608,8 +609,10 @@ impl SysHandle {
     }
 
     pub fn end_drawing(&mut self) {
-        self.handle.send(DrawCall::EndDrawing);
+        self.queue.push(DrawCall::EndDrawing);
+        self.handle.send_multiple(&mut self.queue);
         self.div_stack.clear();
+        self.queue.clear();
         self.cx = 0;
         self.cy = 0;
         self.ui_mode = SysUiMode::Absolute;
@@ -704,21 +707,24 @@ impl DosRt {
         while !self.should_exit {
             self.update_cmds();
             if self.should_draw {
-                self.render(&mut handle, &thread);
                 self.draw(&mut handle, &thread);
+                if self.should_exit {
+                    break;
+                }
+                self.render(&mut handle, &thread);
             }
         }
     }
 
     pub fn draw(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
-        if handle.window_should_close() {
-            self.should_exit = true;
-            self.cmd_pipeline.send(DrawCall::Exiting);
-            self.dos.render_texture = None;
-            return;
-        }
         if let Some(key) = handle.get_char_pressed() {
             self.input.pressed_keys.push(key);
+        }
+        if handle.window_should_close() {
+            self.should_exit = true;
+            self.dos.render_texture = None;
+            self.cmd_pipeline.send(DrawCall::Exiting);
+            return;
         }
         if handle.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
             self.input.left_mouse_down = true;
@@ -745,8 +751,8 @@ impl DosRt {
         } else {
             self.input.right_mouse_released = false;
         }
-        self.input.mouse_x = handle.get_mouse_x() / 4;
-        self.input.mouse_y = handle.get_mouse_y() / 4;
+        self.input.mouse_x = handle.get_mouse_x() / 2;
+        self.input.mouse_y = handle.get_mouse_y() / 2;
         self.cmd_pipeline
             .send(DrawCall::Update {
                 input: self.input.clone(),
@@ -789,7 +795,6 @@ impl DosRt {
                     if drop_shadow {
                         draw.draw_rectangle(x + 1, y + 1, w, h, Color::DARKGRAY);
                     }
-
                     draw.draw_rectangle(x, y, w, h, color.as_rl_color());
                 }
                 DrawCall::DrawPixels { points } => {
@@ -813,8 +818,8 @@ impl DosRt {
                     w,
                     contents,
                 } => {
-                    //self.draw_sprite(&contents, x, y, w, h);
-                    todo!();
+                    //self.dos.draw_sprite(&contents, x, y, w, h);
+                    todo!()
                 }
                 DrawCall::Circle {
                     x,
@@ -882,6 +887,7 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         text_ratios: ratios,
         max_ratio: max,
         div_stack: Vec::new(),
+        queue: Vec::new(),
         background_color: BColor {
             r: 32,
             g: 32,
@@ -906,8 +912,5 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
     };
     let tj = std::thread::spawn(move || fn_main(sys));
     rt.run_loop(handle, thread);
-    println!("done1");
-
     tj.join().unwrap();
-    println!("done");
 }

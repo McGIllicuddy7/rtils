@@ -777,6 +777,16 @@ pub mod rtils_useful {
             sending.push_back(v);
             Ok(())
         }
+        pub fn send_multiple(&self, v: &mut Vec<T>) -> Throws<()> {
+            if self.done.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("done".into());
+            }
+            let mut sending = self.sending.lock().unwrap();
+            for i in v.drain(0..v.len()) {
+                sending.push_back(i);
+            }
+            Ok(())
+        }
 
         pub fn recieve(&self) -> Throws<Option<T>> {
             if self.done.load(std::sync::atomic::Ordering::Acquire) {
