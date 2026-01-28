@@ -7,3 +7,5 @@ edition = "2024"
 raylib = "5.5.1"
 rmp-serde = "1.3.1"
 serde = {version = "1.0.228", features = ["derive", "rc"]}
+[profile.release]
+debug = true

@@ -240,7 +240,6 @@ pub struct SysHandle {
     text_ratios: BTreeMap<char, f64>,
     max_ratio: f64,
     div_stack: Vec<Div>,
-    queue: Vec<DrawCall>,
     text_color: BColor,
     background_color: BColor,
     object_color: BColor,
@@ -406,7 +405,7 @@ impl SysHandle {
         let base = self.get_absolute_pos(Pos2 { x, y });
         let mut current = base;
         for i in texts {
-            self.queue.push(DrawCall::DrawText {
+            self.handle.send(DrawCall::DrawText {
                 x: current.x,
                 y: current.y,
                 size: h,
@@ -425,7 +424,7 @@ impl SysHandle {
 
     pub fn draw_box(&mut self, x: i32, y: i32, w: i32, h: i32) {
         let base = self.get_absolute_pos(Pos2 { x, y });
-        self.queue.push(DrawCall::Rectangle {
+        self.handle.send(DrawCall::Rectangle {
             x,
             y,
             w,
@@ -444,7 +443,7 @@ impl SysHandle {
 
     pub fn draw_circle(&mut self, x: i32, y: i32, rad: i32) {
         let base = self.get_absolute_pos(Pos2 { x, y });
-        self.queue.push(DrawCall::Circle {
+        self.handle.send(DrawCall::Circle {
             x,
             y,
             rad,
@@ -462,7 +461,7 @@ impl SysHandle {
 
     pub fn draw_sprite(&mut self, x: i32, y: i32, w: i32, h: i32, sprite: Sprite) {
         let base = self.get_absolute_pos(Pos2 { x, y });
-        self.queue.push(DrawCall::DrawSprite {
+        self.handle.send(DrawCall::DrawSprite {
             x,
             y,
             h,
@@ -501,7 +500,7 @@ impl SysHandle {
                 max.y = x.y;
             }
         });
-        self.queue.push(DrawCall::DrawPixels { points: mpoints });
+        self.handle.send(DrawCall::DrawPixels { points: mpoints });
         let w = max.x - min.x;
         let h = max.y - min.y;
         self.update_cursor(Rect {
@@ -516,7 +515,7 @@ impl SysHandle {
         let (mut h, texts) = self.text_get_height_and_lines(text, text_height, w - 5);
         h += 10;
         let pos = self.get_absolute_pos(Pos2 { x: x, y: y });
-        self.queue.push(DrawCall::Rectangle {
+        self.handle.send(DrawCall::Rectangle {
             x: pos.x,
             y: pos.y,
             w,
@@ -529,7 +528,7 @@ impl SysHandle {
         current.x += 5;
         current.y += 5;
         for i in texts {
-            self.queue.push(DrawCall::DrawText {
+            self.handle.send(DrawCall::DrawText {
                 x: current.x,
                 y: current.y,
                 size: text_height,
@@ -599,9 +598,8 @@ impl SysHandle {
             }
         }
         self.div_stack.clear();
-        self.queue.clear();
-        self.queue.push(DrawCall::BeginDrawing);
-        self.queue.push(DrawCall::ClearBackground {
+        self.handle.send(DrawCall::BeginDrawing);
+        self.handle.send(DrawCall::ClearBackground {
             color: self.background_color,
         });
         self.cx = 0;
@@ -610,13 +608,8 @@ impl SysHandle {
     }
 
     pub fn end_drawing(&mut self) {
-        self.queue.push(DrawCall::EndDrawing);
-        for i in self.queue.drain(0..self.queue.len()) {
-            self.handle.send(i).unwrap();
-        }
-        self.queue.clear();
+        self.handle.send(DrawCall::EndDrawing);
         self.div_stack.clear();
-        self.queue.clear();
         self.cx = 0;
         self.cy = 0;
         self.ui_mode = SysUiMode::Absolute;
@@ -631,14 +624,6 @@ pub struct Dos {
 
 impl Dos {
     pub fn draw(&mut self, handle: &mut RaylibDrawHandle, thread: &RaylibThread) {
-        let mut h = handle.begin_texture_mode(thread, self.render_texture.as_mut().unwrap());
-        for y in 0..self.image.height() {
-            for x in 0..self.image.width() {
-                h.draw_pixel(x, y, self.image.get_color(x, y));
-            }
-        }
-        drop(h);
-
         handle.draw_texture_pro(
             self.render_texture.as_ref().unwrap(),
             Rectangle::new(0.0, 0.0, 640., -480.0),
@@ -726,6 +711,12 @@ impl DosRt {
     }
 
     pub fn draw(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
+        if handle.window_should_close() {
+            self.should_exit = true;
+            self.cmd_pipeline.send(DrawCall::Exiting);
+            self.dos.render_texture = None;
+            return;
+        }
         if let Some(key) = handle.get_char_pressed() {
             self.input.pressed_keys.push(key);
         }
@@ -763,12 +754,11 @@ impl DosRt {
             .unwrap();
         let mut drw = handle.begin_drawing(thread);
         drw.clear_background(Color::BLACK);
-
         self.dos.draw(&mut drw, thread);
         drw.draw_fps(100, 100);
     }
 
-    pub fn render(&mut self, _handle: &mut RaylibHandle, _thread: &RaylibThread) {
+    pub fn render(&mut self, handle: &mut RaylibHandle, _thread: &RaylibThread) {
         self.recieving_frame = false;
         self.should_draw = false;
         self.cmd_pipeline
@@ -777,10 +767,12 @@ impl DosRt {
             })
             .unwrap();
         self.input.pressed_keys.clear();
+        let mut draw =
+            handle.begin_texture_mode(_thread, self.dos.render_texture.as_mut().unwrap());
         for i in self.frame.drain(0..self.frame.len()) {
             match i {
                 DrawCall::ClearBackground { color } => {
-                    self.dos.image.clear_background(color.as_rl_color());
+                    draw.clear_background(color.as_rl_color());
                 }
                 DrawCall::Rectangle {
                     x,
@@ -792,22 +784,17 @@ impl DosRt {
                     outline,
                 } => {
                     if outline {
-                        self.dos
-                            .image
-                            .draw_rectangle(x - 1, y - 1, w + 2, h + 2, Color::DARKGRAY);
+                        draw.draw_rectangle(x - 1, y - 1, w + 2, h + 2, Color::DARKGRAY);
                     }
                     if drop_shadow {
-                        self.dos
-                            .image
-                            .draw_rectangle(x + 1, y + 1, w, h, Color::DARKGRAY);
+                        draw.draw_rectangle(x + 1, y + 1, w, h, Color::DARKGRAY);
                     }
-                    self.dos
-                        .image
-                        .draw_rectangle(x, y, w, h, color.as_rl_color());
+
+                    draw.draw_rectangle(x, y, w, h, color.as_rl_color());
                 }
                 DrawCall::DrawPixels { points } => {
                     for (p, c) in points {
-                        self.dos.image.draw_pixel(p.x, p.y, c.as_rl_color());
+                        draw.draw_pixel(p.x, p.y, c.as_rl_color());
                     }
                 }
                 DrawCall::DrawText {
@@ -817,9 +804,7 @@ impl DosRt {
                     contents,
                     color,
                 } => {
-                    self.dos
-                        .image
-                        .draw_text(&contents, x, y, size, color.as_rl_color());
+                    draw.draw_text(&contents, x, y, size, color.as_rl_color());
                 }
                 DrawCall::DrawSprite {
                     x,
@@ -828,7 +813,8 @@ impl DosRt {
                     w,
                     contents,
                 } => {
-                    self.dos.draw_sprite(&contents, x, y, w, h);
+                    //self.draw_sprite(&contents, x, y, w, h);
+                    todo!();
                 }
                 DrawCall::Circle {
                     x,
@@ -839,20 +825,19 @@ impl DosRt {
                     outline,
                 } => {
                     if outline {
-                        self.dos.image.draw_circle(x, y, rad + 2, Color::DARKGRAY);
+                        draw.draw_circle(x, y, rad as f32 + 2., Color::DARKGRAY);
                     }
                     if drop_shadow {
-                        self.dos
-                            .image
-                            .draw_circle(x + 1, y + 1, rad + 1, Color::BLACK);
+                        draw.draw_circle(x + 1, y + 1, rad as f32 + 1., Color::BLACK);
                     }
-                    self.dos.image.draw_circle(x, y, rad, color.as_rl_color());
+                    draw.draw_circle(x, y, rad as f32, color.as_rl_color());
                 }
                 _ => {}
             }
         }
     }
 }
+
 pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
     let (cmd1, cmd2) = BPipe::create();
     let inp = UserInput {
@@ -909,7 +894,6 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
             b: 64,
             a: 255,
         },
-        queue: Vec::new(),
         text_color: BColor {
             r: 192,
             g: 192,
@@ -922,5 +906,8 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
     };
     let tj = std::thread::spawn(move || fn_main(sys));
     rt.run_loop(handle, thread);
+    println!("done1");
+
     tj.join().unwrap();
+    println!("done");
 }
