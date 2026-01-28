@@ -212,8 +212,8 @@ pub struct UserInput {
     pressed_keys: Vec<char>,
     mouse_x: i32,
     mouse_y: i32,
-    mouse_dx: i32,
-    mouse_dy: i32,
+    mouse_dx: f32,
+    mouse_dy: f32,
     scroll_amount: i32,
     left_mouse_down: bool,
     right_mouse_down: bool,
@@ -228,8 +228,8 @@ impl UserInput {
             pressed_keys: Vec::new(),
             mouse_x: 0,
             mouse_y: 0,
-            mouse_dx: 0,
-            mouse_dy: 0,
+            mouse_dx: 0.,
+            mouse_dy: 0.,
             left_mouse_down: false,
             right_mouse_down: false,
             left_mouse_pressed: false,
@@ -246,8 +246,8 @@ impl UserInput {
         self.left_mouse_released = false;
         self.right_mouse_released = false;
         self.right_mouse_pressed = false;
-        self.mouse_dx = 0;
-        self.mouse_dy = 0;
+        self.mouse_dx = 0.;
+        self.mouse_dy = 0.;
     }
 }
 pub struct SysHandle {
@@ -792,9 +792,9 @@ impl SysHandle {
                 y: self.user_input.mouse_y,
             })
         {
-            out += self.user_input.mouse_dy as f32 * 1000.0 * height as f32;
+            out += self.user_input.mouse_dy as f32 / h as f32 * 2.0;
         } else if hovered {
-            out -= self.user_input.scroll_amount as f32 * 3.0 * h as f32 / 1000.0;
+            out -= self.user_input.scroll_amount as f32 / h as f32;
         }
 
         self.update_cursor(Rect {
@@ -803,7 +803,7 @@ impl SysHandle {
             w,
             h,
         });
-        out.clamp(0.0, 1.0)
+        out.clamp(0.0, 1.)
     }
     pub fn draw_button_scroll_box_exp<'a, T>(
         &mut self,
@@ -917,17 +917,23 @@ impl SysHandle {
             && self.user_input.mouse_x < base.x + w
             && self.user_input.mouse_y < base.y + h;
         let mut out = amount;
+
+        let bx = Rect {
+            x: bx.x - 5,
+            y: bx.y - 5,
+            w: bx.w + 10,
+            h: bx.h + 10,
+        };
         if self.user_input.left_mouse_down
             && bx.check_collision(Pos2 {
                 x: self.user_input.mouse_x,
                 y: self.user_input.mouse_y,
             })
         {
-            out += self.user_input.mouse_dy as f32 * 3.0 / height as f32;
+            out += self.user_input.mouse_dy as f32 / h as f32 * 2.0;
         } else if hovered {
-            out -= self.user_input.scroll_amount as f32 * 3.0 / height as f32;
+            out -= self.user_input.scroll_amount as f32 / h as f32;
         }
-
         self.update_cursor(Rect {
             x: base.x,
             y: base.y,
@@ -1067,8 +1073,8 @@ impl DosRt {
         self.input.mouse_x = handle.get_mouse_x() / 2;
         self.input.mouse_y = handle.get_mouse_y() / 2;
         let delt = handle.get_mouse_delta();
-        self.input.mouse_dx = delt.x as i32 / 2;
-        self.input.mouse_dy = delt.y as i32 / 2;
+        self.input.mouse_dx = delt.x / 2.;
+        self.input.mouse_dy = delt.y / 2.;
         self.input.scroll_amount = handle.get_mouse_wheel_move() as i32;
         self.cmd_pipeline
             .send(DrawCall::Update {
@@ -1186,8 +1192,8 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
     let (cmd1, cmd2) = BPipe::create();
     let inp = UserInput {
         pressed_keys: Vec::new(),
-        mouse_dx: 0,
-        mouse_dy: 0,
+        mouse_dx: 0.,
+        mouse_dy: 0.,
         mouse_x: 0,
         mouse_y: 0,
         scroll_amount: 0,
