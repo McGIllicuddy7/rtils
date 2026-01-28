@@ -1,7 +1,7 @@
 use raylib::prelude::*;
 pub use serde::{Deserialize, Serialize};
 pub use std::sync::Arc;
-use std::{collections::BTreeMap, error::Error};
+use std::{collections::BTreeMap, error::Error, time::Duration};
 
 use crate::rtils::rtils_useful::BPipe;
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -195,7 +195,7 @@ pub struct Div {
     pub mode: SysUiMode,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UserInput {
     pressed_keys: Vec<char>,
     mouse_x: i32,
@@ -206,6 +206,29 @@ pub struct UserInput {
     right_mouse_pressed: bool,
     left_mouse_released: bool,
     right_mouse_released: bool,
+}
+impl UserInput {
+    pub fn new() -> Self {
+        let inp = UserInput {
+            pressed_keys: Vec::new(),
+            mouse_x: 0,
+            mouse_y: 0,
+            left_mouse_down: false,
+            right_mouse_down: false,
+            left_mouse_pressed: false,
+            right_mouse_pressed: false,
+            left_mouse_released: false,
+            right_mouse_released: false,
+        };
+        inp
+    }
+    pub fn reset(&mut self) {
+        self.pressed_keys.clear();
+        self.left_mouse_pressed = false;
+        self.left_mouse_released = false;
+        self.right_mouse_released = false;
+        self.right_mouse_pressed = false;
+    }
 }
 pub struct SysHandle {
     handle: BPipe<DrawCall>,
@@ -224,6 +247,7 @@ pub struct SysHandle {
     shadows: bool,
     outline: bool,
     user_input: UserInput,
+    should_exit: bool,
 }
 pub fn text_ratios(handle: &RaylibHandle) -> (f64, BTreeMap<char, f64>) {
     let mut out = BTreeMap::new();
@@ -245,6 +269,9 @@ pub fn text_ratios(handle: &RaylibHandle) -> (f64, BTreeMap<char, f64>) {
     (max, out)
 }
 impl SysHandle {
+    pub fn should_exit(&self) -> bool {
+        self.should_exit
+    }
     pub fn char_width(&self, c: char, h: i32) -> Option<i32> {
         if let Some(r) = self.text_ratios.get(&c) {
             let out = (h as f64 * r) as i32;
@@ -311,7 +338,7 @@ impl SysHandle {
         let mut count = 0;
         for i in &split {
             if !i.ends_with('\r') {
-                count += 1;
+                count += h;
             }
         }
         (count, split)
@@ -367,10 +394,10 @@ impl SysHandle {
         let div = self.get_div();
         if div.vertical {
             self.cx = div.x;
-            self.cy = prev_bounds.y + prev_bounds.h;
+            self.cy = prev_bounds.y + prev_bounds.h + 5;
         } else {
             self.cy = div.y;
-            self.cx = prev_bounds.x + prev_bounds.w;
+            self.cx = prev_bounds.x + prev_bounds.w + 5;
         }
     }
 
@@ -517,6 +544,7 @@ impl SysHandle {
             w,
             h,
         });
+
         self.user_input.mouse_x >= pos.x
             && self.user_input.mouse_y >= pos.y
             && self.user_input.mouse_x < pos.x + w
@@ -556,13 +584,14 @@ impl SysHandle {
     }
 
     pub fn begin_drawing(&mut self) {
+        self.user_input.reset();
         while let Ok(Some(x)) = self.handle.recieve() {
             match x {
                 DrawCall::Update { input } => {
                     self.user_input = input;
                 }
                 DrawCall::Exiting => {
-                    todo!()
+                    self.should_exit = true;
                 }
                 _ => {
                     continue;
@@ -591,6 +620,7 @@ impl SysHandle {
         self.cx = 0;
         self.cy = 0;
         self.ui_mode = SysUiMode::Absolute;
+        std::thread::sleep(Duration::from_millis(16));
     }
 }
 
@@ -608,15 +638,18 @@ impl Dos {
             }
         }
         drop(h);
-        handle.draw_texture_rec(
+
+        handle.draw_texture_pro(
             self.render_texture.as_ref().unwrap(),
+            Rectangle::new(0.0, 0.0, 640., -480.0),
             Rectangle::new(
                 0.0,
                 0.0,
                 handle.get_render_width() as f32,
                 handle.get_render_height() as f32,
             ),
-            Vector2::new(0.0, 0.0),
+            Vector2::zero(),
+            0.0,
             Color::WHITE,
         );
     }
@@ -687,8 +720,8 @@ impl DosRt {
             self.update_cmds();
             if self.should_draw {
                 self.render(&mut handle, &thread);
+                self.draw(&mut handle, &thread);
             }
-            self.draw(&mut handle, &thread);
         }
     }
 
@@ -720,15 +753,22 @@ impl DosRt {
             self.input.right_mouse_released = true;
         } else {
             self.input.right_mouse_released = false;
-            self.input.mouse_x = handle.get_mouse_x();
         }
-        self.input.mouse_y = handle.get_mouse_y();
+        self.input.mouse_x = handle.get_mouse_x() / 4;
+        self.input.mouse_y = handle.get_mouse_y() / 4;
+        self.cmd_pipeline
+            .send(DrawCall::Update {
+                input: self.input.clone(),
+            })
+            .unwrap();
         let mut drw = handle.begin_drawing(thread);
         drw.clear_background(Color::BLACK);
+
         self.dos.draw(&mut drw, thread);
+        drw.draw_fps(100, 100);
     }
 
-    pub fn render(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
+    pub fn render(&mut self, _handle: &mut RaylibHandle, _thread: &RaylibThread) {
         self.recieving_frame = false;
         self.should_draw = false;
         self.cmd_pipeline
@@ -812,4 +852,75 @@ impl DosRt {
             }
         }
     }
+}
+pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
+    let (cmd1, cmd2) = BPipe::create();
+    let inp = UserInput {
+        pressed_keys: Vec::new(),
+        mouse_x: 0,
+        mouse_y: 0,
+        left_mouse_down: false,
+        right_mouse_down: false,
+        left_mouse_pressed: false,
+        right_mouse_pressed: false,
+        left_mouse_released: false,
+        right_mouse_released: false,
+    };
+    let (mut handle, thread) = raylib::init()
+        .size(640 * 2, 480 * 2)
+        .title("bridget")
+        .build();
+    handle.set_target_fps(60);
+    let text = handle.load_render_texture(&thread, 640, 480).unwrap();
+    let mut rt = DosRt {
+        dos: Dos {
+            image: Image::gen_image_color(640, 480, Color::BLACK),
+            render_texture: Some(text),
+        },
+        cmd_pipeline: cmd1,
+        frame: Vec::new(),
+        recieving_frame: false,
+        should_draw: false,
+        should_exit: false,
+        input: inp.clone(),
+    };
+
+    let (max, ratios) = text_ratios(&handle);
+    let sys = SysHandle {
+        should_exit: false,
+        handle: cmd2,
+        cx: 0,
+        cy: 0,
+        w: 640,
+        h: 480,
+        ui_mode: SysUiMode::Absolute,
+        text_ratios: ratios,
+        max_ratio: max,
+        div_stack: Vec::new(),
+        background_color: BColor {
+            r: 32,
+            g: 32,
+            b: 32,
+            a: 255,
+        },
+        object_color: BColor {
+            r: 64,
+            g: 64,
+            b: 64,
+            a: 255,
+        },
+        queue: Vec::new(),
+        text_color: BColor {
+            r: 192,
+            g: 192,
+            b: 192,
+            a: 255,
+        },
+        user_input: inp,
+        shadows: false,
+        outline: true,
+    };
+    let tj = std::thread::spawn(move || fn_main(sys));
+    rt.run_loop(handle, thread);
+    tj.join().unwrap();
 }
