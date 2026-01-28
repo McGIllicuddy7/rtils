@@ -1,0 +1,12 @@
+/Users/bridget/dos/target/debug/deps/bitflags-478aee7b31c99486.d: /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/lib.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/iter.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/parser.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/traits.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/public.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/internal.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/external.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/external/serde.rs
+
+/Users/bridget/dos/target/debug/deps/libbitflags-478aee7b31c99486.rmeta: /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/lib.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/iter.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/parser.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/traits.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/public.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/internal.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/external.rs /Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/external/serde.rs
+
+/Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/lib.rs:
+/Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/iter.rs:
+/Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/parser.rs:
+/Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/traits.rs:
+/Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/public.rs:
+/Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/internal.rs:
+/Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/external.rs:
+/Users/bridget/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.10.0/src/external/serde.rs:

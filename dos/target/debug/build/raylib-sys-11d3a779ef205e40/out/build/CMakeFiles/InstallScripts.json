@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/build/cmake_install.cmake",
+		"/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/build/raylib/cmake_install.cmake",
+		"/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/build/raylib/external/glfw/cmake_install.cmake",
+		"/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/build/raylib/external/glfw/src/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
