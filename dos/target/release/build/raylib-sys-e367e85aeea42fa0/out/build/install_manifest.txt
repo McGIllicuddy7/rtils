@@ -1,0 +1,7 @@
+/Users/bridget/rtils/dos/target/release/build/raylib-sys-e367e85aeea42fa0/out/lib/libraylib.a
+/Users/bridget/rtils/dos/target/release/build/raylib-sys-e367e85aeea42fa0/out/include/raylib.h
+/Users/bridget/rtils/dos/target/release/build/raylib-sys-e367e85aeea42fa0/out/include/rlgl.h
+/Users/bridget/rtils/dos/target/release/build/raylib-sys-e367e85aeea42fa0/out/include/raymath.h
+/Users/bridget/rtils/dos/target/release/build/raylib-sys-e367e85aeea42fa0/out/lib/pkgconfig/raylib.pc
+/Users/bridget/rtils/dos/target/release/build/raylib-sys-e367e85aeea42fa0/out/lib/cmake/raylib/raylib-config-version.cmake
+/Users/bridget/rtils/dos/target/release/build/raylib-sys-e367e85aeea42fa0/out/lib/cmake/raylib/raylib-config.cmake
