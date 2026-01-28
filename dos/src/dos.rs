@@ -3,7 +3,7 @@ pub use serde::{Deserialize, Serialize};
 pub use std::sync::Arc;
 use std::{collections::BTreeMap, error::Error, time::Duration};
 
-use crate::rtils::rtils_useful::BPipe;
+use crate::rtils::rtils_useful::{Arena, BPipe};
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct BColor {
     pub r: u8,
@@ -24,6 +24,11 @@ pub struct Rect {
     pub y: i32,
     pub w: i32,
     pub h: i32,
+}
+impl Rect {
+    pub fn check_collision(&self, pos: Pos2) -> bool {
+        pos.x >= self.x && pos.y >= self.y && pos.y < self.y + self.h && pos.x < self.x + self.w
+    }
 }
 
 impl BColor {
@@ -175,6 +180,13 @@ pub enum DrawCall {
     Update {
         input: UserInput,
     },
+    Scissor {
+        x: i32,
+        y: i32,
+        h: i32,
+        w: i32,
+    },
+    EndScissor,
     Exiting,
 }
 
@@ -200,6 +212,9 @@ pub struct UserInput {
     pressed_keys: Vec<char>,
     mouse_x: i32,
     mouse_y: i32,
+    mouse_dx: i32,
+    mouse_dy: i32,
+    scroll_amount: i32,
     left_mouse_down: bool,
     right_mouse_down: bool,
     left_mouse_pressed: bool,
@@ -213,12 +228,15 @@ impl UserInput {
             pressed_keys: Vec::new(),
             mouse_x: 0,
             mouse_y: 0,
+            mouse_dx: 0,
+            mouse_dy: 0,
             left_mouse_down: false,
             right_mouse_down: false,
             left_mouse_pressed: false,
             right_mouse_pressed: false,
             left_mouse_released: false,
             right_mouse_released: false,
+            scroll_amount: 0,
         };
         inp
     }
@@ -228,6 +246,8 @@ impl UserInput {
         self.left_mouse_released = false;
         self.right_mouse_released = false;
         self.right_mouse_pressed = false;
+        self.mouse_dx = 0;
+        self.mouse_dy = 0;
     }
 }
 pub struct SysHandle {
@@ -236,6 +256,8 @@ pub struct SysHandle {
     cy: i32,
     w: i32,
     h: i32,
+    padding_x: i32,
+    padding_y: i32,
     ui_mode: SysUiMode,
     text_ratios: BTreeMap<char, f64>,
     max_ratio: f64,
@@ -358,8 +380,8 @@ impl SysHandle {
                 y: 0,
                 w: self.w,
                 h: self.h,
-                vertical: true,
-                mode: SysUiMode::Absolute,
+                vertical: false,
+                mode: SysUiMode::Sequential,
             }
         }
     }
@@ -401,7 +423,7 @@ impl SysHandle {
         }
     }
 
-    pub fn draw_text(&mut self, x: i32, y: i32, h: i32, max_w: i32, text: &str) {
+    pub fn draw_text_exp(&mut self, x: i32, y: i32, h: i32, max_w: i32, text: &str) {
         let (height, texts) = self.text_get_height_and_lines(text, h, max_w);
         let base = self.get_absolute_pos(Pos2 { x, y });
         let mut current = base;
@@ -423,7 +445,11 @@ impl SysHandle {
         });
     }
 
-    pub fn draw_box(&mut self, x: i32, y: i32, w: i32, h: i32) {
+    pub fn draw_text(&mut self, h: i32, max_w: i32, text: &str) {
+        self.draw_text_exp(self.padding_x, self.padding_y, h, max_w, text);
+    }
+
+    pub fn draw_box_exp(&mut self, x: i32, y: i32, w: i32, h: i32) {
         let base = self.get_absolute_pos(Pos2 { x, y });
         self.queue.push(DrawCall::Rectangle {
             x,
@@ -442,7 +468,11 @@ impl SysHandle {
         });
     }
 
-    pub fn draw_circle(&mut self, x: i32, y: i32, rad: i32) {
+    pub fn draw_box(&mut self, w: i32, h: i32) {
+        self.draw_box_exp(self.padding_x, self.padding_y, w, h)
+    }
+
+    pub fn draw_circle_exp(&mut self, x: i32, y: i32, rad: i32) {
         let base = self.get_absolute_pos(Pos2 { x, y });
         self.queue.push(DrawCall::Circle {
             x,
@@ -460,7 +490,11 @@ impl SysHandle {
         });
     }
 
-    pub fn draw_sprite(&mut self, x: i32, y: i32, w: i32, h: i32, sprite: Sprite) {
+    pub fn draw_circle(&mut self, rad: i32) {
+        self.draw_circle_exp(self.padding_x, self.padding_y, rad)
+    }
+
+    pub fn draw_sprite_exp(&mut self, x: i32, y: i32, w: i32, h: i32, sprite: Sprite) {
         let base = self.get_absolute_pos(Pos2 { x, y });
         self.queue.push(DrawCall::DrawSprite {
             x,
@@ -476,12 +510,17 @@ impl SysHandle {
             h,
         });
     }
+
+    pub fn draw_sprite(&mut self, w: i32, h: i32, sprite: Sprite) {
+        self.draw_sprite_exp(self.padding_x, self.padding_y, w, h, sprite)
+    }
+
     pub fn draw_pixels(&mut self, points: Vec<(Pos2, BColor)>) {
         if points.len() == 0 {
             return;
         }
         let mut mpoints = points;
-        mpoints.iter_mut().for_each(|(x, c)| {
+        mpoints.iter_mut().for_each(|(x, _)| {
             *x = self.get_absolute_pos(*x);
         });
         let mut min = mpoints[0].0;
@@ -511,7 +550,14 @@ impl SysHandle {
         });
     }
 
-    pub fn draw_button(&mut self, x: i32, y: i32, w: i32, text_height: i32, text: &str) -> bool {
+    pub fn draw_button_exp(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        text_height: i32,
+        text: &str,
+    ) -> bool {
         let (mut h, texts) = self.text_get_height_and_lines(text, text_height, w - 5);
         h += 10;
         let pos = self.get_absolute_pos(Pos2 { x: x, y: y });
@@ -551,7 +597,18 @@ impl SysHandle {
             && self.user_input.left_mouse_released
     }
 
-    pub fn begin_div(&mut self, x: i32, y: i32, w: i32, h: i32, vertical: bool, mode: SysUiMode) {
+    pub fn draw_button(&mut self, w: i32, text_height: i32, text: &str) -> bool {
+        self.draw_button_exp(self.padding_x, self.padding_y, w, text_height, text)
+    }
+    pub fn begin_div_exp(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        vertical: bool,
+        mode: SysUiMode,
+    ) {
         let pos = self.get_absolute_pos(Pos2 { x, y });
         self.div_stack.push(Div {
             x: pos.x,
@@ -569,6 +626,17 @@ impl SysHandle {
                 self.cy = pos.y;
             }
         }
+    }
+
+    pub fn begin_div(&mut self, w: i32, h: i32) {
+        self.begin_div_exp(
+            self.padding_x,
+            self.padding_y,
+            w,
+            h,
+            true,
+            SysUiMode::Sequential,
+        );
     }
 
     pub fn end_div(&mut self) {
@@ -605,7 +673,7 @@ impl SysHandle {
         });
         self.cx = 0;
         self.cy = 0;
-        self.ui_mode = SysUiMode::Absolute;
+        self.ui_mode = SysUiMode::Sequential;
     }
 
     pub fn end_drawing(&mut self) {
@@ -615,8 +683,258 @@ impl SysHandle {
         self.queue.clear();
         self.cx = 0;
         self.cy = 0;
-        self.ui_mode = SysUiMode::Absolute;
-        std::thread::sleep(Duration::from_millis(16));
+        self.ui_mode = SysUiMode::Sequential;
+        std::thread::sleep(Duration::from_millis(8));
+    }
+
+    pub fn set_cursor(&mut self, x: i32, y: i32) {
+        self.cx = x;
+        self.cy = y;
+    }
+
+    pub fn draw_text_scroll_box_exp<'a, T>(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        amount: f32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+    ) -> f32 {
+        let base = self.get_absolute_pos(Pos2 { x, y });
+        let mut height = 0;
+        let strings: Vec<String> = objects
+            .iter()
+            .flat_map(|i| {
+                let (dh, cons) = self.text_get_height_and_lines(&as_string(i), text_height, w - 7);
+                height += dh;
+                cons
+            })
+            .collect();
+        self.queue.push(DrawCall::Rectangle {
+            x: base.x,
+            y: base.y,
+            w,
+            h,
+            color: self.object_color,
+            drop_shadow: self.shadows,
+            outline: self.outline,
+        });
+        self.queue.push(DrawCall::Scissor {
+            x: base.x,
+            y: base.y,
+            h,
+            w,
+        });
+        let delta = height as f32 * amount;
+        let base_y = if !upside_down {
+            base.y as f32 - delta
+        } else {
+            base.y as f32 - delta + h as f32 - text_height as f32
+        };
+        let mut y = base_y;
+        for i in strings {
+            let pos = Pos2 {
+                x: base.x,
+                y: y as i32,
+            };
+            let er = i.ends_with('\r');
+            if !(y as i32 + text_height < base.y || y as i32 > base.y + h) {
+                self.queue.push(DrawCall::DrawText {
+                    x: pos.x + 2,
+                    y: pos.y,
+                    size: text_height,
+                    contents: i,
+                    color: self.text_color,
+                });
+            }
+            if !er {
+                if !upside_down {
+                    y += text_height as f32;
+                } else {
+                    y -= text_height as f32;
+                }
+            }
+        }
+        let bx = Rect {
+            x: base.x + w - 8,
+            y: base.y + ((h as f32 - 16.0) * amount) as i32,
+            w: 12,
+            h: 16,
+        };
+        self.queue.push(DrawCall::Rectangle {
+            x: bx.x,
+            y: bx.y,
+            w: bx.w,
+            h: bx.h,
+            color: self.object_color,
+            drop_shadow: false,
+            outline: true,
+        });
+        self.queue.push(DrawCall::EndScissor);
+        let hovered = self.user_input.mouse_x >= base.x
+            && self.user_input.mouse_y >= base.y
+            && self.user_input.mouse_x < base.x + w
+            && self.user_input.mouse_y < base.y + h;
+        let mut out = amount;
+        let bx = Rect {
+            x: bx.x - 5,
+            y: bx.y - 5,
+            w: bx.w + 10,
+            h: bx.h + 10,
+        };
+        if self.user_input.left_mouse_down
+            && bx.check_collision(Pos2 {
+                x: self.user_input.mouse_x,
+                y: self.user_input.mouse_y,
+            })
+        {
+            out += self.user_input.mouse_dy as f32 * 1000.0 * height as f32;
+        } else if hovered {
+            out -= self.user_input.scroll_amount as f32 * 3.0 * h as f32 / 1000.0;
+        }
+
+        self.update_cursor(Rect {
+            x: base.x,
+            y: base.y,
+            w,
+            h,
+        });
+        out.clamp(0.0, 1.0)
+    }
+    pub fn draw_button_scroll_box_exp<'a, T>(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        amount: f32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+    ) -> (f32, Option<usize>) {
+        let base = self.get_absolute_pos(Pos2 { x, y });
+        let mut height = 0;
+        let strings: Vec<(i32, Vec<String>)> = objects
+            .iter()
+            .map(|i| {
+                let (dh, cons) = self.text_get_height_and_lines(&as_string(i), text_height, w - 17);
+                height += dh + 10;
+                (dh + 5, cons)
+            })
+            .collect();
+        self.queue.push(DrawCall::Rectangle {
+            x: base.x,
+            y: base.y,
+            w,
+            h,
+            color: self.object_color,
+            drop_shadow: self.shadows,
+            outline: self.outline,
+        });
+        self.queue.push(DrawCall::Scissor {
+            x: base.x,
+            y: base.y,
+            h,
+            w,
+        });
+        let delta = height as f32 * amount;
+        let base_y = if !upside_down {
+            base.y as f32 - delta
+        } else {
+            base.y as f32 - delta + h as f32 - text_height as f32
+        };
+        let mut y = base_y;
+        let mut idx = 0;
+        let mut hit = None;
+        for i in strings {
+            let pos = Pos2 {
+                x: base.x,
+                y: y as i32,
+            };
+            if !(y as i32 + (i.0 as i32) < base.y || (y as i32) > base.y + h) {
+                self.queue.push(DrawCall::Rectangle {
+                    x: pos.x,
+                    y: pos.y,
+                    w: w - 17,
+                    h: i.0,
+                    color: self.object_color,
+                    drop_shadow: self.shadows,
+                    outline: self.outline,
+                });
+                let mut current = pos;
+                current.x += 2;
+                current.y += 2;
+                for i in i.1 {
+                    self.queue.push(DrawCall::DrawText {
+                        x: current.x,
+                        y: current.y,
+                        size: text_height,
+                        contents: i,
+                        color: self.text_color,
+                    });
+                    current.y += text_height;
+                }
+                let did_hit = self.user_input.mouse_x >= pos.x
+                    && self.user_input.mouse_y >= pos.y
+                    && self.user_input.mouse_x < pos.x + w
+                    && self.user_input.mouse_y < pos.y + h
+                    && self.user_input.left_mouse_released;
+                if did_hit {
+                    hit = Some(idx);
+                }
+            }
+            if !upside_down {
+                y += i.0 as f32 + 5.0;
+            } else {
+                y -= i.0 as f32 + 5.0;
+            }
+
+            idx += 1;
+        }
+        let bx = Rect {
+            x: base.x + w - 8,
+            y: base.y + ((h as f32 - 16.0) * amount) as i32,
+            w: 12,
+            h: 16,
+        };
+        self.queue.push(DrawCall::Rectangle {
+            x: bx.x,
+            y: bx.y,
+            w: bx.w,
+            h: bx.h,
+            color: self.object_color,
+            drop_shadow: false,
+            outline: true,
+        });
+        self.queue.push(DrawCall::EndScissor);
+        let hovered = self.user_input.mouse_x >= base.x
+            && self.user_input.mouse_y >= base.y
+            && self.user_input.mouse_x < base.x + w
+            && self.user_input.mouse_y < base.y + h;
+        let mut out = amount;
+        if self.user_input.left_mouse_down
+            && bx.check_collision(Pos2 {
+                x: self.user_input.mouse_x,
+                y: self.user_input.mouse_y,
+            })
+        {
+            out += self.user_input.mouse_dy as f32 * 3.0 / height as f32;
+        } else if hovered {
+            out -= self.user_input.scroll_amount as f32 * 3.0 / height as f32;
+        }
+
+        self.update_cursor(Rect {
+            x: base.x,
+            y: base.y,
+            w,
+            h,
+        });
+        (out.clamp(0.0, 1.0), hit)
     }
 }
 
@@ -748,6 +1066,10 @@ impl DosRt {
         }
         self.input.mouse_x = handle.get_mouse_x() / 2;
         self.input.mouse_y = handle.get_mouse_y() / 2;
+        let delt = handle.get_mouse_delta();
+        self.input.mouse_dx = delt.x as i32 / 2;
+        self.input.mouse_dy = delt.y as i32 / 2;
+        self.input.scroll_amount = handle.get_mouse_wheel_move() as i32;
         self.cmd_pipeline
             .send(DrawCall::Update {
                 input: self.input.clone(),
@@ -759,6 +1081,87 @@ impl DosRt {
         drw.draw_fps(100, 100);
     }
 
+    pub fn run_draw_call<T>(
+        draw: &mut RaylibTextureMode<'_, T>,
+        it: &mut dyn Iterator<Item = DrawCall>,
+    ) -> Option<()> {
+        let i = it.next()?;
+        match i {
+            DrawCall::ClearBackground { color } => {
+                draw.clear_background(color.as_rl_color());
+            }
+            DrawCall::Rectangle {
+                x,
+                y,
+                w,
+                h,
+                color,
+                drop_shadow,
+                outline,
+            } => {
+                if outline {
+                    draw.draw_rectangle(x - 1, y - 1, w + 2, h + 2, Color::DARKGRAY);
+                }
+                if drop_shadow {
+                    draw.draw_rectangle(x + 1, y + 1, w, h, Color::DARKGRAY);
+                }
+                draw.draw_rectangle(x, y, w, h, color.as_rl_color());
+            }
+            DrawCall::DrawPixels { points } => {
+                for (p, c) in points {
+                    draw.draw_pixel(p.x, p.y, c.as_rl_color());
+                }
+            }
+            DrawCall::DrawText {
+                x,
+                y,
+                size,
+                contents,
+                color,
+            } => {
+                draw.draw_text(&contents, x, y, size, color.as_rl_color());
+            }
+            DrawCall::DrawSprite {
+                x,
+                y,
+                h,
+                w,
+                contents,
+            } => {
+                //self.dos.draw_sprite(&contents, x, y, w, h);
+                todo!()
+            }
+            DrawCall::Circle {
+                x,
+                y,
+                rad,
+                color,
+                drop_shadow,
+                outline,
+            } => {
+                if outline {
+                    draw.draw_circle(x, y, rad as f32 + 2., Color::DARKGRAY);
+                }
+                if drop_shadow {
+                    draw.draw_circle(x + 1, y + 1, rad as f32 + 1., Color::BLACK);
+                }
+                draw.draw_circle(x, y, rad as f32, color.as_rl_color());
+            }
+            DrawCall::Scissor { x, y, h, w } => {
+                let mut sz = draw.begin_scissor_mode(x, y, w, h);
+                loop {
+                    if Self::run_draw_call(&mut sz, it).is_none() {
+                        break;
+                    }
+                }
+            }
+            DrawCall::EndScissor => {
+                return None;
+            }
+            _ => {}
+        }
+        Some(())
+    }
     pub fn render(&mut self, handle: &mut RaylibHandle, _thread: &RaylibThread) {
         self.recieving_frame = false;
         self.should_draw = false;
@@ -770,69 +1173,10 @@ impl DosRt {
         self.input.pressed_keys.clear();
         let mut draw =
             handle.begin_texture_mode(_thread, self.dos.render_texture.as_mut().unwrap());
-        for i in self.frame.drain(0..self.frame.len()) {
-            match i {
-                DrawCall::ClearBackground { color } => {
-                    draw.clear_background(color.as_rl_color());
-                }
-                DrawCall::Rectangle {
-                    x,
-                    y,
-                    w,
-                    h,
-                    color,
-                    drop_shadow,
-                    outline,
-                } => {
-                    if outline {
-                        draw.draw_rectangle(x - 1, y - 1, w + 2, h + 2, Color::DARKGRAY);
-                    }
-                    if drop_shadow {
-                        draw.draw_rectangle(x + 1, y + 1, w, h, Color::DARKGRAY);
-                    }
-                    draw.draw_rectangle(x, y, w, h, color.as_rl_color());
-                }
-                DrawCall::DrawPixels { points } => {
-                    for (p, c) in points {
-                        draw.draw_pixel(p.x, p.y, c.as_rl_color());
-                    }
-                }
-                DrawCall::DrawText {
-                    x,
-                    y,
-                    size,
-                    contents,
-                    color,
-                } => {
-                    draw.draw_text(&contents, x, y, size, color.as_rl_color());
-                }
-                DrawCall::DrawSprite {
-                    x,
-                    y,
-                    h,
-                    w,
-                    contents,
-                } => {
-                    //self.dos.draw_sprite(&contents, x, y, w, h);
-                    todo!()
-                }
-                DrawCall::Circle {
-                    x,
-                    y,
-                    rad,
-                    color,
-                    drop_shadow,
-                    outline,
-                } => {
-                    if outline {
-                        draw.draw_circle(x, y, rad as f32 + 2., Color::DARKGRAY);
-                    }
-                    if drop_shadow {
-                        draw.draw_circle(x + 1, y + 1, rad as f32 + 1., Color::BLACK);
-                    }
-                    draw.draw_circle(x, y, rad as f32, color.as_rl_color());
-                }
-                _ => {}
+        let mut drain = self.frame.drain(0..self.frame.len());
+        loop {
+            if Self::run_draw_call(&mut draw, &mut drain).is_none() {
+                break;
             }
         }
     }
@@ -842,8 +1186,11 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
     let (cmd1, cmd2) = BPipe::create();
     let inp = UserInput {
         pressed_keys: Vec::new(),
+        mouse_dx: 0,
+        mouse_dy: 0,
         mouse_x: 0,
         mouse_y: 0,
+        scroll_amount: 0,
         left_mouse_down: false,
         right_mouse_down: false,
         left_mouse_pressed: false,
@@ -855,7 +1202,7 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         .size(640 * 2, 480 * 2)
         .title("bridget")
         .build();
-    handle.set_target_fps(60);
+    handle.set_target_fps(120);
     let text = handle.load_render_texture(&thread, 640, 480).unwrap();
     let mut rt = DosRt {
         dos: Dos {
@@ -878,7 +1225,9 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         cy: 0,
         w: 640,
         h: 480,
-        ui_mode: SysUiMode::Absolute,
+        padding_x: 4,
+        padding_y: 4,
+        ui_mode: SysUiMode::Sequential,
         text_ratios: ratios,
         max_ratio: max,
         div_stack: Vec::new(),

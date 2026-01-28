@@ -8,19 +8,19 @@ fn main() {
 
 pub fn main_func(mut handle: SysHandle) {
     let mut timer = 0.0;
+    let mut amnt = 0.0;
+    let strings: Vec<String> = (0..30).map(|i| format!("hello :{i}")).collect();
     while !handle.should_exit() {
         handle.begin_drawing();
-        handle.begin_div(100, 100, 200, 100, true, dos::SysUiMode::Sequential);
-        handle.draw_text(2, 2, 10, 200, "hello world");
-        if handle.draw_button(2, 2, 100, 10, if timer > 0.0 { "pressed" } else { "exit" }) {
-            timer = 1.0;
-        }
-        handle.end_div();
-        if timer > 0.0 {
-            timer -= 0.016;
-            if timer < 0. {
-                timer = 0.0;
-            }
+        handle.set_cursor(100, 100);
+        handle.begin_div(200, 380);
+        let hit;
+        (amnt, hit) =
+            handle.draw_button_scroll_box_exp(2, 2, 200, 200, 10, amnt, false, &strings, |x| {
+                x.to_string()
+            });
+        if let Some(h) = hit {
+            println!("h:{h}");
         }
         handle.end_drawing();
     }
