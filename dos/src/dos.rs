@@ -610,7 +610,7 @@ impl SysHandle {
 
     pub fn end_drawing(&mut self) {
         self.queue.push(DrawCall::EndDrawing);
-        self.handle.send_multiple(&mut self.queue);
+        self.handle.send_multiple(&mut self.queue).unwrap();
         self.div_stack.clear();
         self.queue.clear();
         self.cx = 0;
@@ -630,12 +630,7 @@ impl Dos {
         handle.draw_texture_pro(
             self.render_texture.as_ref().unwrap(),
             Rectangle::new(0.0, 0.0, 640., -480.0),
-            Rectangle::new(
-                0.0,
-                0.0,
-                handle.get_render_width() as f32,
-                handle.get_render_height() as f32,
-            ),
+            Rectangle::new(0.0, 0.0, 640. * 2., 480. * 2.),
             Vector2::zero(),
             0.0,
             Color::WHITE,
@@ -723,7 +718,7 @@ impl DosRt {
         if handle.window_should_close() {
             self.should_exit = true;
             self.dos.render_texture = None;
-            self.cmd_pipeline.send(DrawCall::Exiting);
+            self.cmd_pipeline.send(DrawCall::Exiting).unwrap();
             return;
         }
         if handle.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
