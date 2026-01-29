@@ -1328,14 +1328,17 @@ impl SysHandle {
 pub struct Dos {
     pub image: Image,
     pub render_texture: Option<RenderTexture2D>,
+    pub w: i32,
+    pub h: i32,
 }
 
 impl Dos {
     pub fn draw(&mut self, handle: &mut RaylibDrawHandle, _thread: &RaylibThread) {
+        let rat = self.w as f32 / 640.0;
         handle.draw_texture_pro(
             self.render_texture.as_ref().unwrap(),
             Rectangle::new(0.0, 0.0, 640., -480.0),
-            Rectangle::new(0.0, 0.0, 640. * 2., 480. * 2.),
+            Rectangle::new(0.0, 0.0, self.w as f32, self.h as f32),
             Vector2::zero(),
             0.0,
             Color::WHITE,
@@ -1346,6 +1349,8 @@ impl Dos {
         Self {
             image: Image::gen_image_color(640, 480, Color::WHITE),
             render_texture: None,
+            w: 640,
+            h: 480,
         }
     }
 
@@ -1467,11 +1472,12 @@ impl DosRt {
         } else {
             self.input.right_arrow_pressed = false;
         }
-        self.input.mouse_x = handle.get_mouse_x() / 2;
-        self.input.mouse_y = handle.get_mouse_y() / 2;
+        let rat = self.dos.w as f32 / 640.0;
+        self.input.mouse_x = (handle.get_mouse_x() as f32 / rat) as i32;
+        self.input.mouse_y = (handle.get_mouse_y() as f32 / rat) as i32;
         let delt = handle.get_mouse_delta();
-        self.input.mouse_dx = delt.x / 2.;
-        self.input.mouse_dy = delt.y / 2.;
+        self.input.mouse_dx = delt.x / rat;
+        self.input.mouse_dy = delt.y / rat;
         self.input.scroll_amount = handle.get_mouse_wheel_move() as i32;
         self.cmd_pipeline
             .send(DrawCall::Update {
@@ -1611,16 +1617,21 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         left_arrow_pressed: false,
         right_arrow_pressed: false,
     };
-    let (mut handle, thread) = raylib::init()
-        .size(640 * 2, 480 * 2)
-        .title("bridget")
-        .build();
-    handle.set_target_fps(120);
+
+    let (mut handle, thread) = raylib::init().title("bridget").build();
+
+    let h = raylib::window::get_monitor_height(0) - 100;
+    println!("{}", h);
+    let w = (4 * h) / 3;
+    handle.set_window_size(w, h);
+    handle.set_window_position(50, 50);
     let text = handle.load_render_texture(&thread, 640, 480).unwrap();
     let mut rt = DosRt {
         dos: Dos {
             image: Image::gen_image_color(640, 480, Color::BLACK),
             render_texture: Some(text),
+            h,
+            w,
         },
         cmd_pipeline: cmd1,
         frame: Vec::new(),

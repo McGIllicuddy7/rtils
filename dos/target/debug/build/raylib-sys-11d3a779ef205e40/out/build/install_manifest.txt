@@ -1,7 +1,0 @@
-/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/lib/libraylib.a
-/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/include/raylib.h
-/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/include/rlgl.h
-/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/include/raymath.h
-/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/lib/pkgconfig/raylib.pc
-/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/lib/cmake/raylib/raylib-config-version.cmake
-/Users/bridget/dos/target/debug/build/raylib-sys-11d3a779ef205e40/out/lib/cmake/raylib/raylib-config.cmake
