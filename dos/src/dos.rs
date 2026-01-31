@@ -3,12 +3,10 @@ pub use serde::{Deserialize, Serialize};
 pub use std::sync::Arc;
 use std::{
     collections::{BTreeMap, HashMap},
-    error::Error,
-    hash::Hash,
     time::Duration,
 };
 
-use crate::rtils::rtils_useful::{Arena, BPipe};
+use crate::rtils::rtils_useful::BPipe;
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct BColor {
     pub r: u8,
@@ -56,90 +54,9 @@ impl BColor {
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Sprite {
-    pub width: i32,
-    pub height: i32,
-    pub data: Arc<[BColor]>,
+    pub name: String,
 }
-impl Sprite {
-    pub fn sample(&self, x: f64, y: f64, w: f64, h: f64) -> BColor {
-        let sw = self.width as f64;
-        let sh = self.height as f64;
-        let xrt = w / sw;
-        let yrt = h / sh;
-        let xp = x * xrt;
-        let yp = y * yrt;
-        let xact = ((xp.round()) as i32).clamp(0, self.width - 1);
-        let yact = ((yp.round()) as i32).clamp(0, self.height - 1);
-        self.data[xact as usize + yact as usize * self.width as usize]
-    }
-
-    pub fn sample_rl(&self, x: f64, y: f64, w: f64, h: f64) -> Color {
-        let sw = self.width as f64;
-        let sh = self.height as f64;
-        let xrt = w / sw;
-        let yrt = h / sh;
-        let xp = x * xrt;
-        let yp = y * yrt;
-        let xact = ((xp.round()) as i32).clamp(0, self.width - 1);
-        let yact = ((yp.round()) as i32).clamp(0, self.height - 1);
-        self.data[xact as usize + yact as usize * self.width as usize].as_rl_color()
-    }
-
-    pub fn load_from_file(name: &str) -> Result<Self, Box<dyn Error>> {
-        let mut img = Image::load_image(name)?;
-        let h = img.height();
-        let w = img.width();
-        let mut v = Vec::new();
-        v.reserve_exact((h * w) as usize);
-        for y in 0..h {
-            for x in 0..w {
-                v.push(BColor::from_rl_color(img.get_color(x, y)));
-            }
-        }
-        Ok(Self {
-            width: w,
-            height: h,
-            data: v.into(),
-        })
-    }
-
-    pub fn from_image(img: &mut Image) -> Self {
-        let h = img.height();
-        let w = img.width();
-        let mut v = Vec::new();
-        v.reserve_exact((h * w) as usize);
-        for y in 0..h {
-            for x in 0..w {
-                v.push(BColor::from_rl_color(img.get_color(x, y)));
-            }
-        }
-        Self {
-            width: w,
-            height: h,
-            data: v.into(),
-        }
-    }
-
-    pub fn to_image(&self) -> Image {
-        let mut out = Image::gen_image_color(self.width, self.height, Color::WHITE);
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let c = self.data[(y * self.width + x) as usize];
-                out.draw_pixel(x, y, c.as_rl_color());
-            }
-        }
-        out
-    }
-
-    pub fn save_to_file(&self, name: &str) {
-        let img = self.to_image();
-        img.export_image(name);
-    }
-
-    pub fn get(&self, x: i32, y: i32) -> BColor {
-        self.data[(y * self.width + x) as usize]
-    }
-}
+impl Sprite {}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum DrawCall {
@@ -191,6 +108,15 @@ pub enum DrawCall {
         y: i32,
         h: i32,
         w: i32,
+    },
+    LoadedImage {
+        name: String,
+        width: i32,
+        height: i32,
+        color: BColor,
+    },
+    UnloadedImage {
+        name: String,
     },
     EndScissor,
     Exiting,
@@ -1185,7 +1111,7 @@ impl SysHandle {
         let mut out_selected = inp.selected;
         let mut output = inp.text;
         let mut out_cursor = inp.cursor;
-        let mut selected_section = None;
+        let selected_section = None;
         let mut returned = None;
         if self.user_input.left_mouse_released {
             if bx.check_collision(Pos2 {
@@ -1328,13 +1254,13 @@ impl SysHandle {
 pub struct Dos {
     pub image: Image,
     pub render_texture: Option<RenderTexture2D>,
+    pub loaded_textures: HashMap<String, Texture2D>,
     pub w: i32,
     pub h: i32,
 }
 
 impl Dos {
     pub fn draw(&mut self, handle: &mut RaylibDrawHandle, _thread: &RaylibThread) {
-        let rat = self.w as f32 / 640.0;
         handle.draw_texture_pro(
             self.render_texture.as_ref().unwrap(),
             Rectangle::new(0.0, 0.0, 640., -480.0),
@@ -1349,6 +1275,7 @@ impl Dos {
         Self {
             image: Image::gen_image_color(640, 480, Color::WHITE),
             render_texture: None,
+            loaded_textures: HashMap::new(),
             w: 640,
             h: 480,
         }
@@ -1356,15 +1283,6 @@ impl Dos {
 
     pub fn setup(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
         self.render_texture = Some(handle.load_render_texture(thread, 640, 480).unwrap());
-    }
-
-    pub fn draw_sprite(&mut self, sprite: &Sprite, x: i32, y: i32, w: i32, h: i32) {
-        for yp in 0..h {
-            for xp in 0..w {
-                let c = sprite.sample_rl(xp as f64, yp as f64, w as f64, h as f64);
-                self.image.draw_pixel(xp + x, yp + y, c);
-            }
-        }
     }
 }
 
@@ -1491,8 +1409,10 @@ impl DosRt {
     }
 
     pub fn run_draw_call<T>(
+        map: &mut HashMap<String, Texture2D>,
         draw: &mut RaylibTextureMode<'_, T>,
         it: &mut dyn Iterator<Item = DrawCall>,
+        to_load: &mut Vec<String>,
     ) -> Option<()> {
         let i = it.next()?;
         match i {
@@ -1545,8 +1465,28 @@ impl DosRt {
                 w,
                 contents,
             } => {
-                //self.dos.draw_sprite(&contents, x, y, w, h);
-                todo!()
+                let Some(tex) = map.get(&contents.name) else {
+                    to_load.push(contents.name.clone());
+                    return Some(());
+                };
+                draw.draw_texture_pro(
+                    tex,
+                    Rectangle {
+                        x: 0.0,
+                        y: 0.0,
+                        width: tex.width() as f32,
+                        height: tex.height() as f32,
+                    },
+                    Rectangle {
+                        x: x as f32,
+                        y: y as f32,
+                        width: w as f32,
+                        height: h as f32,
+                    },
+                    Vector2::zero(),
+                    0.0,
+                    Color::WHITE,
+                );
             }
             DrawCall::Circle {
                 x,
@@ -1567,7 +1507,7 @@ impl DosRt {
             DrawCall::Scissor { x, y, h, w } => {
                 let mut sz = draw.begin_scissor_mode(x, y, w, h);
                 loop {
-                    if Self::run_draw_call(&mut sz, it).is_none() {
+                    if Self::run_draw_call(map, &mut sz, it, to_load).is_none() {
                         break;
                     }
                 }
@@ -1590,11 +1530,26 @@ impl DosRt {
         self.input.pressed_keys.clear();
         let mut draw =
             handle.begin_texture_mode(_thread, self.dos.render_texture.as_mut().unwrap());
+        let mut to_load = Vec::new();
         let mut drain = self.frame.drain(0..self.frame.len());
         loop {
-            if Self::run_draw_call(&mut draw, &mut drain).is_none() {
+            if Self::run_draw_call(
+                &mut self.dos.loaded_textures,
+                &mut draw,
+                &mut drain,
+                &mut to_load,
+            )
+            .is_none()
+            {
                 break;
             }
+        }
+        drop(draw);
+        for i in to_load {
+            let Ok(x) = handle.load_texture(_thread, &i) else {
+                continue;
+            };
+            self.dos.loaded_textures.insert(i, x);
         }
     }
 }
@@ -1628,6 +1583,7 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
     let text = handle.load_render_texture(&thread, 640, 480).unwrap();
     let mut rt = DosRt {
         dos: Dos {
+            loaded_textures: HashMap::new(),
             image: Image::gen_image_color(640, 480, Color::BLACK),
             render_texture: Some(text),
             h,

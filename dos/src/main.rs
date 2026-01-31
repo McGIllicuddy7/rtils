@@ -1,6 +1,4 @@
-use std::process::exit;
-
-use dos::{SysHandle, TextBoxData, setup};
+use dos::{SysHandle, setup};
 
 fn main() {
     setup(main_func);
