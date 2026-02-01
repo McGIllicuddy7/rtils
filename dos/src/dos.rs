@@ -1630,6 +1630,8 @@ impl DosRt {
                 self.render(&mut handle, &thread);
             }
         }
+        self.dos.render_texture = None;
+        self.dos.loaded_textures.clear();
     }
 
     pub fn draw(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
@@ -1638,7 +1640,6 @@ impl DosRt {
         }
         if handle.window_should_close() {
             self.should_exit = true;
-            self.dos.render_texture = None;
             self.cmd_pipeline.send(DrawCall::Exiting).unwrap();
             return;
         }
@@ -1812,6 +1813,7 @@ impl DosRt {
         }
         Some(())
     }
+
     pub fn render(&mut self, handle: &mut RaylibHandle, _thread: &RaylibThread) {
         self.recieving_frame = false;
         self.should_draw = false;
