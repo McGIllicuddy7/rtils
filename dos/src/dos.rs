@@ -109,11 +109,11 @@ pub enum DrawCall {
         h: i32,
         w: i32,
     },
-    LoadedImage {
+    LoadImage {
         name: String,
         width: i32,
         height: i32,
-        color: BColor,
+        data: Arc<[BColor]>,
     },
     UnloadedImage {
         name: String,
@@ -1374,6 +1374,16 @@ impl SysHandle {
             && self.user_input.left_mouse_released
     }
 
+    pub fn draw_button_image(
+        &mut self,
+        w: i32,
+        text_height: i32,
+        text: &str,
+        image: Sprite,
+    ) -> bool {
+        self.draw_button_image_exp(self.padding_x, self.padding_y, w, text_height, text, image)
+    }
+
     pub fn draw_button_image_scroll_box_exp<'a, T>(
         &mut self,
         x: i32,
@@ -1542,6 +1552,112 @@ impl SysHandle {
         });
         (out.clamp(0.0, 1.0), hit)
     }
+
+    pub fn draw_button_image_scroll_box_saved_exp<T>(
+        &mut self,
+        name: &str,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+        as_image: impl Fn(&T) -> Sprite,
+    ) -> Option<usize> {
+        let amnt = if let Some(k) = self.scroll_box_data.get(name) {
+            *k
+        } else {
+            self.scroll_box_data.insert(name.to_string(), 0.0);
+            0.0
+        };
+        let (a, hit) = self.draw_button_image_scroll_box_exp(
+            x,
+            y,
+            w,
+            h,
+            text_height,
+            amnt,
+            upside_down,
+            objects,
+            as_string,
+            as_image,
+        );
+        *self.scroll_box_data.get_mut(name).unwrap() = a;
+        hit
+    }
+
+    pub fn draw_button_scroll_box<T>(
+        &mut self,
+        name: &str,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+    ) -> Option<usize> {
+        self.draw_button_scroll_box_saved_exp(
+            name,
+            self.padding_x,
+            self.padding_y,
+            w,
+            h,
+            text_height,
+            upside_down,
+            objects,
+            as_string,
+        )
+    }
+
+    pub fn draw_text_scroll_box<T>(
+        &mut self,
+        name: &str,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+    ) {
+        self.draw_text_scroll_box_saved_exp(
+            name,
+            self.padding_x,
+            self.padding_y,
+            w,
+            h,
+            text_height,
+            upside_down,
+            objects,
+            as_string,
+        );
+    }
+
+    pub fn draw_button_image_scroll_box<T>(
+        &mut self,
+        name: &str,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+        as_image: impl Fn(&T) -> Sprite,
+    ) -> Option<usize> {
+        self.draw_button_image_scroll_box_saved_exp(
+            name,
+            self.padding_x,
+            self.padding_y,
+            w,
+            h,
+            text_height,
+            upside_down,
+            objects,
+            as_string,
+            as_image,
+        )
+    }
 }
 
 pub struct Dos {
@@ -1590,7 +1706,26 @@ pub struct DosRt {
 }
 
 impl DosRt {
-    pub fn update_cmds(&mut self) {
+    pub fn load_image(
+        &mut self,
+        name: String,
+        width: i32,
+        height: i32,
+        data: Arc<[BColor]>,
+        handle: &mut RaylibHandle,
+        thread: &RaylibThread,
+    ) {
+        let mut image = raylib::prelude::Image::gen_image_color(width, height, Color::WHITE);
+        for i in 0..height {
+            for j in 0..width {
+                image.draw_pixel(j, i, data[(i * width + j) as usize].as_rl_color());
+            }
+        }
+        let tex = handle.load_texture_from_image(thread, &image).unwrap();
+        self.dos.loaded_textures.insert(name, tex);
+    }
+
+    pub fn update_cmds(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
         while let Ok(Some(next)) = self.cmd_pipeline.recieve() {
             if self.recieving_frame {
                 match next {
@@ -1613,6 +1748,17 @@ impl DosRt {
                     DrawCall::BeginDrawing => {
                         self.recieving_frame = true;
                     }
+                    DrawCall::LoadImage {
+                        name,
+                        width,
+                        height,
+                        data,
+                    } => {
+                        self.load_image(name, width, height, data, handle, thread);
+                    }
+                    DrawCall::UnloadedImage { name } => {
+                        self.dos.loaded_textures.remove(&name);
+                    }
                     _ => continue,
                 }
             }
@@ -1621,7 +1767,7 @@ impl DosRt {
 
     pub fn run_loop(&mut self, mut handle: RaylibHandle, thread: RaylibThread) {
         while !self.should_exit {
-            self.update_cmds();
+            self.update_cmds(&mut handle, &thread);
             if self.should_draw {
                 self.draw(&mut handle, &thread);
                 if self.should_exit {
