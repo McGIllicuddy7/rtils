@@ -1,4 +1,4 @@
-use dos::{SysHandle, setup};
+use dos::{Sprite, SysHandle, setup};
 
 fn main() {
     setup(main_func);
@@ -6,20 +6,25 @@ fn main() {
 
 pub fn main_func(mut handle: SysHandle) {
     let strings: Vec<String> = (0..30).map(|i| format!("hello :{i}")).collect();
+    let mut df = 0.0;
     while !handle.should_exit() {
         handle.begin_drawing();
         handle.begin_div(200, 380);
-        let hit = handle.draw_button_scroll_box_saved_exp(
-            "bx",
+        let (f, hit) = handle.draw_button_image_scroll_box_exp(
             2,
             2,
             200,
             200,
             10,
+            df,
             false,
             &strings,
             |x| x.to_string(),
+            |_| Sprite {
+                name: "image.png".to_string(),
+            },
         );
+        df = f;
         if let Some(h) = hit {
             println!("h:{h}");
         }

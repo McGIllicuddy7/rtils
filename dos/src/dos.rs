@@ -647,6 +647,7 @@ impl SysHandle {
     pub fn draw_button(&mut self, w: i32, text_height: i32, text: &str) -> bool {
         self.draw_button_exp(self.padding_x, self.padding_y, w, text_height, text)
     }
+
     pub fn begin_div_exp(
         &mut self,
         x: i32,
@@ -1248,6 +1249,298 @@ impl SysHandle {
         let (out, d2) = self.text_user_input_exp(x, y, w, h, text_height, data);
         *self.text_box_data.get_mut(name).unwrap() = d2;
         out
+    }
+
+    pub fn is_char_pressed(&self, ch: char) -> bool {
+        self.user_input.pressed_keys.contains(&ch)
+    }
+
+    pub fn is_key_pressed(&self, ch: char) -> bool {
+        self.user_input
+            .pressed_keys
+            .iter()
+            .map(|i| i.to_ascii_lowercase())
+            .find(|i| *i == ch.to_ascii_lowercase())
+            .is_some()
+    }
+
+    pub fn left_mouse_down(&self) -> bool {
+        self.user_input.left_mouse_down
+    }
+
+    pub fn left_mouse_pressed(&self) -> bool {
+        self.user_input.left_arrow_pressed
+    }
+
+    pub fn left_mouse_released(&self) -> bool {
+        self.user_input.left_mouse_released
+    }
+
+    pub fn right_mouse_down(&self) -> bool {
+        self.user_input.right_mouse_down
+    }
+
+    pub fn right_mouse_pressed(&self) -> bool {
+        self.user_input.right_arrow_pressed
+    }
+
+    pub fn right_mouse_released(&self) -> bool {
+        self.user_input.right_mouse_released
+    }
+
+    pub fn get_pressed_chars(&self) -> &[char] {
+        &self.user_input.pressed_keys
+    }
+
+    pub fn get_mouse_x(&self) -> i32 {
+        self.user_input.mouse_x
+    }
+
+    pub fn get_mouse_y(&self) -> i32 {
+        self.user_input.mouse_y
+    }
+
+    pub fn get_mouse_pos(&self) -> Pos2 {
+        Pos2 {
+            x: self.cx,
+            y: self.cy,
+        }
+    }
+
+    pub fn draw_button_image_exp(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        text_height: i32,
+        text: &str,
+        image: Sprite,
+    ) -> bool {
+        let (mut h, texts) = self.text_get_height_and_lines(text, text_height, w - 30);
+        if h < 25 {
+            h = 25;
+        }
+        let pos = self.get_absolute_pos(Pos2 { x: x, y: y });
+        let did_hit = self.user_input.mouse_x >= pos.x
+            && self.user_input.mouse_y >= pos.y
+            && self.user_input.mouse_x < pos.x + w
+            && self.user_input.mouse_y < pos.y + h;
+        let col = if did_hit && self.user_input.left_mouse_down {
+            self.object_pressed_color
+        } else {
+            self.object_color
+        };
+        self.queue.push(DrawCall::Rectangle {
+            x: pos.x,
+            y: pos.y,
+            w,
+            h,
+            color: col,
+            drop_shadow: self.shadows,
+            outline: self.outline,
+        });
+        let mut current = pos;
+
+        self.queue.push(DrawCall::DrawSprite {
+            x: current.x,
+            y: current.y + (h - 25) / 2,
+            h: 25,
+            w: 25,
+            contents: image,
+        });
+        current.x += 30;
+        current.y += 5;
+        for i in texts {
+            self.queue.push(DrawCall::DrawText {
+                x: current.x,
+                y: current.y,
+                size: text_height,
+                contents: i,
+                color: self.text_color,
+            });
+            current.y += text_height;
+        }
+        self.update_cursor(Rect {
+            x: pos.x,
+            y: pos.y,
+            w,
+            h,
+        });
+
+        self.user_input.mouse_x >= pos.x
+            && self.user_input.mouse_y >= pos.y
+            && self.user_input.mouse_x < pos.x + w
+            && self.user_input.mouse_y < pos.y + h
+            && self.user_input.left_mouse_released
+    }
+
+    pub fn draw_button_image_scroll_box_exp<'a, T>(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        text_height: i32,
+        amount: f32,
+        upside_down: bool,
+        objects: &[T],
+        as_string: impl Fn(&T) -> String,
+        as_image: impl Fn(&T) -> Sprite,
+    ) -> (f32, Option<usize>) {
+        let base = self.get_absolute_pos(Pos2 { x, y });
+        let mut height = 0;
+        let strings: Vec<(i32, Vec<String>, Sprite)> = objects
+            .iter()
+            .map(|i| {
+                let (mut dh, cons) =
+                    self.text_get_height_and_lines(&as_string(i), text_height, w - 30);
+                if dh < 25 {
+                    dh = 25;
+                }
+                height += dh + 10;
+                (dh + 5, cons, as_image(i))
+            })
+            .collect();
+        self.queue.push(DrawCall::Rectangle {
+            x: base.x,
+            y: base.y,
+            w,
+            h,
+            color: self.object_color,
+            drop_shadow: self.shadows,
+            outline: self.outline,
+        });
+        self.queue.push(DrawCall::Scissor {
+            x: base.x,
+            y: base.y,
+            h,
+            w,
+        });
+        let delta = height as f32 * amount;
+        let base_y = if !upside_down {
+            base.y as f32 - delta
+        } else {
+            base.y as f32 - delta + h as f32 - text_height as f32
+        };
+        let mut y = base_y;
+        let mut idx = 0;
+        let mut hit = None;
+        for i in strings {
+            let pos = Pos2 {
+                x: base.x,
+                y: y as i32,
+            };
+            if !(y as i32 + (i.0 as i32) < base.y || (y as i32) > base.y + h) {
+                let did_hit = self.user_input.mouse_x >= pos.x
+                    && self.user_input.mouse_y >= pos.y
+                    && self.user_input.mouse_x < pos.x + w
+                    && self.user_input.mouse_y < pos.y + i.0;
+                let col = if did_hit && self.user_input.left_mouse_down {
+                    self.object_pressed_color
+                } else {
+                    self.object_color
+                };
+                self.queue.push(DrawCall::Rectangle {
+                    x: pos.x,
+                    y: pos.y,
+                    w: w - 11,
+                    h: i.0,
+                    color: col,
+                    drop_shadow: self.shadows,
+                    outline: self.outline,
+                });
+                self.queue.push(DrawCall::DrawSprite {
+                    x: pos.x,
+                    y: pos.y + (i.0 - 25) / 2,
+                    w: 25,
+                    h: 25,
+                    contents: i.2,
+                });
+                let mut current = pos;
+                current.x += 30;
+                current.y += 2;
+                for i in i.1 {
+                    self.queue.push(DrawCall::DrawText {
+                        x: current.x,
+                        y: current.y,
+                        size: text_height,
+                        contents: i,
+                        color: self.text_color,
+                    });
+                    current.y += text_height;
+                }
+
+                if did_hit && self.user_input.left_mouse_released {
+                    hit = Some(idx);
+                }
+            }
+            if !upside_down {
+                y += i.0 as f32 + 5.0;
+            } else {
+                y -= i.0 as f32 + 5.0;
+            }
+            idx += 1;
+        }
+        let bx = Rect {
+            x: base.x + w - 8,
+            y: base.y + ((h as f32 - 16.0) * amount) as i32,
+            w: 12,
+            h: 16,
+        };
+        self.queue.push(DrawCall::Rectangle {
+            x: bx.x,
+            y: bx.y,
+            w: bx.w,
+            h: bx.h,
+            color: self.object_color,
+            drop_shadow: false,
+            outline: true,
+        });
+        self.queue.push(DrawCall::DrawPixels {
+            points: vec![
+                (
+                    Pos2 { x: bx.x, y: base.y },
+                    BColor::from_rl_color(Color::DARKGRAY),
+                ),
+                (
+                    Pos2 {
+                        x: bx.x,
+                        y: base.y + h,
+                    },
+                    BColor::from_rl_color(Color::DARKGRAY),
+                ),
+            ],
+            width: 1.0,
+        });
+        self.queue.push(DrawCall::EndScissor);
+        let hovered = self.user_input.mouse_x >= base.x
+            && self.user_input.mouse_y >= base.y
+            && self.user_input.mouse_x < base.x + w
+            && self.user_input.mouse_y < base.y + h;
+        let mut out = amount;
+        let bx = Rect {
+            x: bx.x - 5,
+            y: bx.y - 5,
+            w: bx.w + 10,
+            h: bx.h + 10,
+        };
+        if self.user_input.left_mouse_down
+            && bx.check_collision(Pos2 {
+                x: self.user_input.mouse_x,
+                y: self.user_input.mouse_y,
+            })
+        {
+            out += self.user_input.mouse_dy as f32 / h as f32 * 1.5;
+        } else if hovered {
+            out -= self.user_input.scroll_amount as f32 / h as f32;
+        }
+        self.update_cursor(Rect {
+            x: base.x,
+            y: base.y,
+            w,
+            h,
+        });
+        (out.clamp(0.0, 1.0), hit)
     }
 }
 
