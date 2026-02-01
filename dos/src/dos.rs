@@ -1,6 +1,8 @@
 use raylib::prelude::*;
 pub use serde::{Deserialize, Serialize};
 pub use std::sync::Arc;
+pub const SCREEN_WIDTH: i32 = 1000;
+pub const SCREEN_HEIGHT: i32 = 750;
 use std::{
     collections::{BTreeMap, HashMap},
     time::Duration,
@@ -136,6 +138,7 @@ pub struct Div {
     pub w: i32,
     pub h: i32,
     pub vertical: bool,
+    pub thumbnail_size: i32,
     pub mode: SysUiMode,
 }
 
@@ -188,30 +191,7 @@ impl UserInput {
         self.mouse_dy = 0.;
     }
 }
-pub struct SysHandle {
-    handle: BPipe<DrawCall>,
-    cx: i32,
-    cy: i32,
-    w: i32,
-    h: i32,
-    padding_x: i32,
-    padding_y: i32,
-    ui_mode: SysUiMode,
-    text_ratios: BTreeMap<char, f64>,
-    max_ratio: f64,
-    div_stack: Vec<Div>,
-    text_color: BColor,
-    background_color: BColor,
-    object_color: BColor,
-    object_pressed_color: BColor,
-    shadows: bool,
-    outline: bool,
-    user_input: UserInput,
-    should_exit: bool,
-    queue: Vec<DrawCall>,
-    text_box_data: HashMap<String, TextBoxData>,
-    scroll_box_data: HashMap<String, f32>,
-}
+
 pub fn text_ratios(handle: &RaylibHandle) -> (f64, BTreeMap<char, f64>) {
     let mut out = BTreeMap::new();
     let mut text = String::new();
@@ -249,19 +229,52 @@ impl TextBoxData {
         }
     }
 }
+
+pub struct Theme {
+    text_color: BColor,
+    background_color: BColor,
+    object_color: BColor,
+    object_pressed_color: BColor,
+    decoration_color: BColor,
+    shadows: bool,
+    outline: bool,
+}
+pub struct SysHandle {
+    handle: BPipe<DrawCall>,
+    cx: i32,
+    cy: i32,
+    w: i32,
+    h: i32,
+    padding_x: i32,
+    padding_y: i32,
+    ui_mode: SysUiMode,
+    text_ratios: BTreeMap<char, f64>,
+    max_ratio: f64,
+    div_stack: Vec<Div>,
+    theme: Theme,
+    user_input: UserInput,
+    should_exit: bool,
+    queue: Vec<DrawCall>,
+    text_box_data: HashMap<String, TextBoxData>,
+    scroll_box_data: HashMap<String, f32>,
+}
 impl SysHandle {
+    pub fn get_thumbnail_size(&self) -> i32 {
+        self.get_div().thumbnail_size
+    }
+
     pub fn should_exit(&self) -> bool {
         self.should_exit
     }
-    pub fn char_width(&self, c: char, h: i32) -> Option<i32> {
+    pub fn char_width(&self, c: char, h: i32) -> Option<f64> {
         if let Some(r) = self.text_ratios.get(&c) {
-            let out = (h as f64 * r) as i32;
+            let out = h as f64 * *r;
             Some(out)
         } else {
             if c == '\n' || c == '\r' {
                 None
             } else {
-                Some((self.max_ratio * h as f64) as i32)
+                Some(self.max_ratio * h as f64)
             }
         }
     }
@@ -288,31 +301,36 @@ impl SysHandle {
         text_height: i32,
         max_w: i32,
     ) -> Pos2 {
-        let mut cx = x;
-        let mut cy = y;
+        let mut cx = x as f64;
+        let mut cy = y as f64;
         let mut id = 0;
         for i in text.chars() {
             if i == '\r' {
-                cx = x;
+                cx = x as f64;
             } else if i == '\n' {
-                cx = x;
-                cy += text_height;
+                cx = x as f64;
+                cy += text_height as f64;
             } else {
                 let wp = self.char_width(i, text_height).unwrap();
-                if cx + wp >= max_w + x {
-                    cx = x + wp;
-                    cy += text_height;
+                if cx + wp as f64 >= (max_w + x) as f64 {
+                    cx = x as f64 + wp;
+                    cy += text_height as f64;
                 } else {
+                    cx += wp as f64;
                     if id == index {
-                        return Pos2 { x: cx, y: cy };
+                        return Pos2 {
+                            x: cx as i32,
+                            y: cy as i32,
+                        };
                     }
-                    cx += wp;
                 }
             }
-
             id += 1;
         }
-        return Pos2 { x: cx, y: cy };
+        Pos2 {
+            x: cx as i32,
+            y: cy as i32,
+        }
     }
     pub fn nearest_char_to(
         &self,
@@ -327,27 +345,28 @@ impl SysHandle {
         if text.is_empty() {
             return 0;
         }
-        let mut cx = x;
-        let mut cy = y;
+        let mut cx = x as f64;
+        let mut cy = y as f64;
         let mut id = 0;
         let mut min_id = text.len() - 1;
-        let mut min_dist = 100000;
+        let mut min_dist = 10000.0;
         for i in text.chars() {
             if i == '\r' {
-                cx = x;
+                cx = x as f64;
             } else if i == '\n' {
-                cx = x;
-                cy += text_height;
+                cx = x as f64;
+                cy += text_height as f64;
             } else {
                 let wp = self.char_width(i, text_height).unwrap();
-                if cx + wp >= max_w + x {
-                    cx = x + wp;
-                    cy += text_height;
+                if cx + wp >= (max_w + x) as f64 {
+                    cx = x as f64 + wp;
+                    cy += text_height as f64;
                 } else {
                     cx += wp;
                 }
             }
-            let dist = (pos_y - cy) * (pos_y - cy) + (pos_x - cx) * (pos_x - cx);
+            let dist = (pos_y as f64 - cy) * (pos_y as f64 - cy)
+                + (pos_x as f64 - cx) * (pos_x as f64 - cx);
             if dist < min_dist {
                 min_id = id;
                 min_dist = dist;
@@ -360,20 +379,20 @@ impl SysHandle {
     pub fn split_by_required_line(&self, text: &str, h: i32, max_w: i32) -> Vec<String> {
         let mut out = Vec::new();
         let mut current = String::new();
-        let mut w = 0;
+        let mut w = 0.0;
         for i in text.chars() {
             if i == '\r' {
                 current.push(i);
                 out.push(current);
                 current = String::new();
-                w = 0;
+                w = 0.;
             } else if i == '\n' {
                 out.push(current);
                 current = String::new();
-                w = 0;
+                w = 0.;
             } else {
                 let wp = self.char_width(i, h).unwrap();
-                if w + wp >= max_w {
+                if w + wp >= max_w as f64 {
                     w = wp;
                     out.push(current);
                     current = String::new();
@@ -416,6 +435,7 @@ impl SysHandle {
                 w: self.w,
                 h: self.h,
                 vertical: false,
+                thumbnail_size: 50,
                 mode: SysUiMode::Sequential,
             }
         }
@@ -468,7 +488,7 @@ impl SysHandle {
                 y: current.y,
                 size: h,
                 contents: i,
-                color: self.text_color,
+                color: self.theme.text_color,
             });
             current.y += h;
         }
@@ -491,9 +511,9 @@ impl SysHandle {
             y,
             w,
             h,
-            color: self.object_color,
-            drop_shadow: self.shadows,
-            outline: self.outline,
+            color: self.theme.object_color,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
         });
         self.update_cursor(Rect {
             x: base.x,
@@ -513,9 +533,9 @@ impl SysHandle {
             x,
             y,
             rad,
-            color: self.object_color,
-            drop_shadow: self.shadows,
-            outline: self.outline,
+            color: self.theme.object_color,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
         });
         self.update_cursor(Rect {
             x: base.x,
@@ -604,9 +624,9 @@ impl SysHandle {
             && self.user_input.mouse_x < pos.x + w
             && self.user_input.mouse_y < pos.y + h;
         let col = if did_hit && self.user_input.left_mouse_down {
-            self.object_pressed_color
+            self.theme.object_pressed_color
         } else {
-            self.object_color
+            self.theme.object_color
         };
         self.queue.push(DrawCall::Rectangle {
             x: pos.x,
@@ -614,8 +634,8 @@ impl SysHandle {
             w,
             h,
             color: col,
-            drop_shadow: self.shadows,
-            outline: self.outline,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
         });
         let mut current = pos;
         current.x += 5;
@@ -626,7 +646,7 @@ impl SysHandle {
                 y: current.y,
                 size: text_height,
                 contents: i,
-                color: self.text_color,
+                color: self.theme.text_color,
             });
             current.y += text_height;
         }
@@ -665,6 +685,7 @@ impl SysHandle {
             h,
             vertical,
             mode,
+            thumbnail_size: 50,
         });
         self.ui_mode = mode;
         match self.ui_mode {
@@ -717,7 +738,7 @@ impl SysHandle {
         self.queue.clear();
         self.queue.push(DrawCall::BeginDrawing);
         self.queue.push(DrawCall::ClearBackground {
-            color: self.background_color,
+            color: self.theme.background_color,
         });
         self.cx = 0;
         self.cy = 0;
@@ -767,9 +788,9 @@ impl SysHandle {
             y: base.y,
             w,
             h,
-            color: self.object_color,
-            drop_shadow: self.shadows,
-            outline: self.outline,
+            color: self.theme.object_color,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
         });
         self.queue.push(DrawCall::Scissor {
             x: base.x,
@@ -796,7 +817,7 @@ impl SysHandle {
                     y: pos.y,
                     size: text_height,
                     contents: i,
-                    color: self.text_color,
+                    color: self.theme.text_color,
                 });
             }
             if !er {
@@ -818,7 +839,7 @@ impl SysHandle {
             y: bx.y,
             w: bx.w,
             h: bx.h,
-            color: self.object_color,
+            color: self.theme.decoration_color,
             drop_shadow: false,
             outline: true,
         });
@@ -898,9 +919,9 @@ impl SysHandle {
             y: base.y,
             w,
             h,
-            color: self.object_color,
-            drop_shadow: self.shadows,
-            outline: self.outline,
+            color: self.theme.object_color,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
         });
         self.queue.push(DrawCall::Scissor {
             x: base.x,
@@ -928,9 +949,9 @@ impl SysHandle {
                     && self.user_input.mouse_x < pos.x + w
                     && self.user_input.mouse_y < pos.y + i.0;
                 let col = if did_hit && self.user_input.left_mouse_down {
-                    self.object_pressed_color
+                    self.theme.object_pressed_color
                 } else {
-                    self.object_color
+                    self.theme.object_color
                 };
                 self.queue.push(DrawCall::Rectangle {
                     x: pos.x,
@@ -938,8 +959,8 @@ impl SysHandle {
                     w: w - 11,
                     h: i.0,
                     color: col,
-                    drop_shadow: self.shadows,
-                    outline: self.outline,
+                    drop_shadow: self.theme.shadows,
+                    outline: self.theme.outline,
                 });
                 let mut current = pos;
                 current.x += 2;
@@ -950,7 +971,7 @@ impl SysHandle {
                         y: current.y,
                         size: text_height,
                         contents: i,
-                        color: self.text_color,
+                        color: self.theme.text_color,
                     });
                     current.y += text_height;
                 }
@@ -977,7 +998,7 @@ impl SysHandle {
             y: bx.y,
             w: bx.w,
             h: bx.h,
-            color: self.object_color,
+            color: self.theme.decoration_color,
             drop_shadow: false,
             outline: true,
         });
@@ -1166,12 +1187,12 @@ impl SysHandle {
             w,
             h,
             color: if out_selected {
-                self.object_pressed_color
+                self.theme.object_pressed_color
             } else {
-                self.object_color
+                self.theme.object_color
             },
-            drop_shadow: self.shadows,
-            outline: self.outline,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
         });
         self.queue.push(DrawCall::Scissor {
             x: pos.x,
@@ -1189,16 +1210,16 @@ impl SysHandle {
             let x = self.user_input.mouse_x;
             let y = self.user_input.mouse_y;
             let o2 = output.clone() + " ";
-            let id = self.nearest_char_to(x, y, cursor.x, cursor.y, &o2, text_height, w);
+            let id = self.nearest_char_to(x, y, cursor.x, cursor.y, &o2, text_height, w - 2);
             out_cursor = id;
         }
-        let lok = self.char_location(out_cursor, cursor.x, cursor.y, &output, text_height, w);
+        let lok = self.char_location(out_cursor, cursor.x, cursor.y, &output, text_height, w - 2);
         self.queue.push(DrawCall::Rectangle {
             x: lok.x - 2,
             y: lok.y,
             w: 2,
             h: text_height,
-            color: self.text_color,
+            color: self.theme.decoration_color,
             drop_shadow: false,
             outline: false,
         });
@@ -1208,7 +1229,7 @@ impl SysHandle {
                 y: cursor.y,
                 size: text_height,
                 contents: i,
-                color: self.text_color,
+                color: self.theme.text_color,
             });
             cursor.y += text_height;
         }
@@ -1316,9 +1337,10 @@ impl SysHandle {
         text: &str,
         image: Sprite,
     ) -> bool {
-        let (mut h, texts) = self.text_get_height_and_lines(text, text_height, w - 30);
-        if h < 25 {
-            h = 25;
+        let (mut h, texts) =
+            self.text_get_height_and_lines(text, text_height, w - (self.get_thumbnail_size() + 5));
+        if h < self.get_thumbnail_size() {
+            h = self.get_thumbnail_size();
         }
         let pos = self.get_absolute_pos(Pos2 { x: x, y: y });
         let did_hit = self.user_input.mouse_x >= pos.x
@@ -1326,9 +1348,9 @@ impl SysHandle {
             && self.user_input.mouse_x < pos.x + w
             && self.user_input.mouse_y < pos.y + h;
         let col = if did_hit && self.user_input.left_mouse_down {
-            self.object_pressed_color
+            self.theme.object_pressed_color
         } else {
-            self.object_color
+            self.theme.object_color
         };
         self.queue.push(DrawCall::Rectangle {
             x: pos.x,
@@ -1336,19 +1358,19 @@ impl SysHandle {
             w,
             h,
             color: col,
-            drop_shadow: self.shadows,
-            outline: self.outline,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
         });
         let mut current = pos;
 
         self.queue.push(DrawCall::DrawSprite {
             x: current.x,
-            y: current.y + (h - 25) / 2,
-            h: 25,
-            w: 25,
+            y: current.y + (h - self.get_thumbnail_size()) / 2,
+            h: self.get_thumbnail_size(),
+            w: self.get_thumbnail_size(),
             contents: image,
         });
-        current.x += 30;
+        current.x += self.get_thumbnail_size() + 5;
         current.y += 5;
         for i in texts {
             self.queue.push(DrawCall::DrawText {
@@ -1356,7 +1378,7 @@ impl SysHandle {
                 y: current.y,
                 size: text_height,
                 contents: i,
-                color: self.text_color,
+                color: self.theme.text_color,
             });
             current.y += text_height;
         }
@@ -1402,10 +1424,13 @@ impl SysHandle {
         let strings: Vec<(i32, Vec<String>, Sprite)> = objects
             .iter()
             .map(|i| {
-                let (mut dh, cons) =
-                    self.text_get_height_and_lines(&as_string(i), text_height, w - 30);
-                if dh < 25 {
-                    dh = 25;
+                let (mut dh, cons) = self.text_get_height_and_lines(
+                    &as_string(i),
+                    text_height,
+                    w - (self.get_thumbnail_size() + 5),
+                );
+                if dh < self.get_thumbnail_size() {
+                    dh = self.get_thumbnail_size();
                 }
                 height += dh + 10;
                 (dh + 5, cons, as_image(i))
@@ -1416,9 +1441,9 @@ impl SysHandle {
             y: base.y,
             w,
             h,
-            color: self.object_color,
-            drop_shadow: self.shadows,
-            outline: self.outline,
+            color: self.theme.object_color,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
         });
         self.queue.push(DrawCall::Scissor {
             x: base.x,
@@ -1446,9 +1471,9 @@ impl SysHandle {
                     && self.user_input.mouse_x < pos.x + w
                     && self.user_input.mouse_y < pos.y + i.0;
                 let col = if did_hit && self.user_input.left_mouse_down {
-                    self.object_pressed_color
+                    self.theme.object_pressed_color
                 } else {
-                    self.object_color
+                    self.theme.object_color
                 };
                 self.queue.push(DrawCall::Rectangle {
                     x: pos.x,
@@ -1456,18 +1481,18 @@ impl SysHandle {
                     w: w - 11,
                     h: i.0,
                     color: col,
-                    drop_shadow: self.shadows,
-                    outline: self.outline,
+                    drop_shadow: self.theme.shadows,
+                    outline: self.theme.outline,
                 });
                 self.queue.push(DrawCall::DrawSprite {
                     x: pos.x,
-                    y: pos.y + (i.0 - 25) / 2,
-                    w: 25,
-                    h: 25,
+                    y: pos.y + (i.0 - self.get_thumbnail_size()) / 2,
+                    w: self.get_thumbnail_size(),
+                    h: self.get_thumbnail_size(),
                     contents: i.2,
                 });
                 let mut current = pos;
-                current.x += 30;
+                current.x += self.get_thumbnail_size() + 5;
                 current.y += 2;
                 for i in i.1 {
                     self.queue.push(DrawCall::DrawText {
@@ -1475,7 +1500,7 @@ impl SysHandle {
                         y: current.y,
                         size: text_height,
                         contents: i,
-                        color: self.text_color,
+                        color: self.theme.text_color,
                     });
                     current.y += text_height;
                 }
@@ -1502,7 +1527,7 @@ impl SysHandle {
             y: bx.y,
             w: bx.w,
             h: bx.h,
-            color: self.object_color,
+            color: self.theme.decoration_color,
             drop_shadow: false,
             outline: true,
         });
@@ -1672,7 +1697,7 @@ impl Dos {
     pub fn draw(&mut self, handle: &mut RaylibDrawHandle, _thread: &RaylibThread) {
         handle.draw_texture_pro(
             self.render_texture.as_ref().unwrap(),
-            Rectangle::new(0.0, 0.0, 640., -480.0),
+            Rectangle::new(0.0, 0.0, SCREEN_WIDTH as f32, -(SCREEN_HEIGHT as f32)),
             Rectangle::new(0.0, 0.0, self.w as f32, self.h as f32),
             Vector2::zero(),
             0.0,
@@ -1682,16 +1707,20 @@ impl Dos {
 
     pub fn new() -> Self {
         Self {
-            image: Image::gen_image_color(640, 480, Color::WHITE),
+            image: Image::gen_image_color(SCREEN_WIDTH, SCREEN_HEIGHT, Color::WHITE),
             render_texture: None,
             loaded_textures: HashMap::new(),
-            w: 640,
-            h: 480,
+            w: SCREEN_WIDTH,
+            h: SCREEN_HEIGHT,
         }
     }
 
     pub fn setup(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
-        self.render_texture = Some(handle.load_render_texture(thread, 640, 480).unwrap());
+        self.render_texture = Some(
+            handle
+                .load_render_texture(thread, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+                .unwrap(),
+        );
     }
 }
 
@@ -1830,7 +1859,7 @@ impl DosRt {
         } else {
             self.input.right_arrow_pressed = false;
         }
-        let rat = self.dos.w as f32 / 640.0;
+        let rat = self.dos.w as f32 / (SCREEN_WIDTH as f32);
         self.input.mouse_x = (handle.get_mouse_x() as f32 / rat) as i32;
         self.input.mouse_y = (handle.get_mouse_y() as f32 / rat) as i32;
         let delt = handle.get_mouse_delta();
@@ -2021,11 +2050,13 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
     let w = (4 * h) / 3;
     handle.set_window_size(w, h);
     handle.set_window_position(50, 50);
-    let text = handle.load_render_texture(&thread, 640, 480).unwrap();
+    let text = handle
+        .load_render_texture(&thread, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+        .unwrap();
     let mut rt = DosRt {
         dos: Dos {
             loaded_textures: HashMap::new(),
-            image: Image::gen_image_color(640, 480, Color::BLACK),
+            image: Image::gen_image_color(SCREEN_WIDTH, SCREEN_HEIGHT, Color::BLACK),
             render_texture: Some(text),
             h,
             w,
@@ -2044,8 +2075,8 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         handle: cmd2,
         cx: 0,
         cy: 0,
-        w: 640,
-        h: 480,
+        w: SCREEN_WIDTH,
+        h: SCREEN_HEIGHT,
         padding_x: 4,
         padding_y: 4,
         ui_mode: SysUiMode::Sequential,
@@ -2053,33 +2084,42 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         max_ratio: max,
         div_stack: Vec::new(),
         queue: Vec::new(),
-        background_color: BColor {
-            r: 32,
-            g: 32,
-            b: 32,
-            a: 255,
-        },
-        object_color: BColor {
-            r: 64,
-            g: 64,
-            b: 64,
-            a: 255,
-        },
-        object_pressed_color: BColor {
-            r: 48,
-            g: 48,
-            b: 48,
-            a: 255,
-        },
-        text_color: BColor {
-            r: 192,
-            g: 192,
-            b: 192,
-            a: 255,
+        theme: Theme {
+            background_color: BColor {
+                r: 32,
+                g: 32,
+                b: 32,
+                a: 255,
+            },
+            object_color: BColor {
+                r: 64,
+                g: 64,
+                b: 64,
+                a: 255,
+            },
+            object_pressed_color: BColor {
+                r: 48,
+                g: 48,
+                b: 48,
+                a: 255,
+            },
+            text_color: BColor {
+                r: 192,
+                g: 192,
+                b: 192,
+                a: 255,
+            },
+            decoration_color: BColor {
+                r: 192,
+                g: 160,
+                b: 160,
+                a: 255,
+            },
+            shadows: false,
+            outline: true,
         },
         user_input: inp,
-        shadows: false,
-        outline: true,
+
         text_box_data: HashMap::new(),
         scroll_box_data: HashMap::new(),
     };

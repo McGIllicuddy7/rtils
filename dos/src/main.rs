@@ -15,7 +15,7 @@ pub fn main_func(mut handle: SysHandle) {
             2,
             200,
             200,
-            10,
+            20,
             df,
             false,
             &strings,
@@ -30,7 +30,7 @@ pub fn main_func(mut handle: SysHandle) {
         }
         handle.end_div();
         handle.begin_div(200, 380);
-        let x = handle.text_user_input_saved_exp("text", 2, 2, 100, 50, 10);
+        let x = handle.text_user_input_saved_exp("text", 2, 2, 200, 50, 20);
         if let Some(msg) = x {
             println!("{msg}");
         }
