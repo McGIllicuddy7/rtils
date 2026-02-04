@@ -1,4 +1,4 @@
-use dos::{Sprite, SysHandle, setup};
+use dos::{SysHandle, setup};
 
 fn main() {
     setup(main_func);
@@ -20,9 +20,7 @@ pub fn main_func(mut handle: SysHandle) {
             false,
             &strings,
             |x| x.to_string(),
-            |_| Sprite {
-                name: "image.png".to_string(),
-            },
+            |_| "image.png".into(),
         );
         df = f;
         if let Some(h) = hit {

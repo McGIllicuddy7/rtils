@@ -1,14 +1,16 @@
 use raylib::prelude::*;
 pub use serde::{Deserialize, Serialize};
 pub use std::sync::Arc;
-pub const SCREEN_WIDTH: i32 = 1000;
-pub const SCREEN_HEIGHT: i32 = 750;
+pub const SCREEN_WIDTH: i32 = 1200;
+pub const SCREEN_HEIGHT: i32 = 900;
+pub const DEFAULT_THUMBNAIL_SIZE: i32 = 80;
 use std::{
     collections::{BTreeMap, HashMap},
+    sync::atomic::AtomicU16,
     time::Duration,
 };
 
-use crate::rtils::rtils_useful::BPipe;
+use crate::rtils::rtils_useful::{BPipe, SharedList};
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct BColor {
     pub r: u8,
@@ -54,11 +56,6 @@ impl BColor {
         }
     }
 }
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Sprite {
-    pub name: String,
-}
-impl Sprite {}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum DrawCall {
@@ -87,12 +84,12 @@ pub enum DrawCall {
         contents: String,
         color: BColor,
     },
-    DrawSprite {
+    DrawImage {
         x: i32,
         y: i32,
         h: i32,
         w: i32,
-        contents: Sprite,
+        contents_ident: String,
     },
     Circle {
         x: i32,
@@ -230,14 +227,15 @@ impl TextBoxData {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Theme {
-    text_color: BColor,
-    background_color: BColor,
-    object_color: BColor,
-    object_pressed_color: BColor,
-    decoration_color: BColor,
-    shadows: bool,
-    outline: bool,
+    pub text_color: BColor,
+    pub background_color: BColor,
+    pub object_color: BColor,
+    pub object_pressed_color: BColor,
+    pub decoration_color: BColor,
+    pub shadows: bool,
+    pub outline: bool,
 }
 pub struct SysHandle {
     handle: BPipe<DrawCall>,
@@ -261,6 +259,13 @@ pub struct SysHandle {
 impl SysHandle {
     pub fn get_thumbnail_size(&self) -> i32 {
         self.get_div().thumbnail_size
+    }
+
+    pub fn set_thumbail_size(&mut self, size: i32) {
+        if let Some(mut div) = self.div_stack.pop() {
+            div.thumbnail_size = size;
+            self.div_stack.push(div);
+        }
     }
 
     pub fn should_exit(&self) -> bool {
@@ -435,7 +440,7 @@ impl SysHandle {
                 w: self.w,
                 h: self.h,
                 vertical: false,
-                thumbnail_size: 50,
+                thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
                 mode: SysUiMode::Sequential,
             }
         }
@@ -549,14 +554,14 @@ impl SysHandle {
         self.draw_circle_exp(self.padding_x, self.padding_y, rad)
     }
 
-    pub fn draw_sprite_exp(&mut self, x: i32, y: i32, w: i32, h: i32, sprite: Sprite) {
+    pub fn draw_image_exp(&mut self, x: i32, y: i32, w: i32, h: i32, image: &str) {
         let base = self.get_absolute_pos(Pos2 { x, y });
-        self.queue.push(DrawCall::DrawSprite {
+        self.queue.push(DrawCall::DrawImage {
             x,
             y,
             h,
             w,
-            contents: sprite,
+            contents_ident: image.into(),
         });
         self.update_cursor(Rect {
             x: base.x,
@@ -566,8 +571,8 @@ impl SysHandle {
         });
     }
 
-    pub fn draw_sprite(&mut self, w: i32, h: i32, sprite: Sprite) {
-        self.draw_sprite_exp(self.padding_x, self.padding_y, w, h, sprite)
+    pub fn draw_image(&mut self, w: i32, h: i32, image: &str) {
+        self.draw_image_exp(self.padding_x, self.padding_y, w, h, image)
     }
 
     pub fn draw_pixels(&mut self, points: Vec<(Pos2, BColor)>, width: f32) {
@@ -685,7 +690,7 @@ impl SysHandle {
             h,
             vertical,
             mode,
-            thumbnail_size: 50,
+            thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
         });
         self.ui_mode = mode;
         match self.ui_mode {
@@ -1335,7 +1340,7 @@ impl SysHandle {
         w: i32,
         text_height: i32,
         text: &str,
-        image: Sprite,
+        image: &str,
     ) -> bool {
         let (mut h, texts) =
             self.text_get_height_and_lines(text, text_height, w - (self.get_thumbnail_size() + 5));
@@ -1363,12 +1368,12 @@ impl SysHandle {
         });
         let mut current = pos;
 
-        self.queue.push(DrawCall::DrawSprite {
+        self.queue.push(DrawCall::DrawImage {
             x: current.x,
             y: current.y + (h - self.get_thumbnail_size()) / 2,
             h: self.get_thumbnail_size(),
             w: self.get_thumbnail_size(),
-            contents: image,
+            contents_ident: image.into(),
         });
         current.x += self.get_thumbnail_size() + 5;
         current.y += 5;
@@ -1396,14 +1401,15 @@ impl SysHandle {
             && self.user_input.left_mouse_released
     }
 
-    pub fn draw_button_image(
-        &mut self,
-        w: i32,
-        text_height: i32,
-        text: &str,
-        image: Sprite,
-    ) -> bool {
-        self.draw_button_image_exp(self.padding_x, self.padding_y, w, text_height, text, image)
+    pub fn draw_button_image(&mut self, w: i32, text_height: i32, text: &str, image: &str) -> bool {
+        self.draw_button_image_exp(
+            self.padding_x,
+            self.padding_y,
+            w,
+            text_height,
+            text,
+            image.into(),
+        )
     }
 
     pub fn draw_button_image_scroll_box_exp<'a, T>(
@@ -1417,11 +1423,11 @@ impl SysHandle {
         upside_down: bool,
         objects: &[T],
         as_string: impl Fn(&T) -> String,
-        as_image: impl Fn(&T) -> Sprite,
+        as_image: impl Fn(&T) -> String,
     ) -> (f32, Option<usize>) {
         let base = self.get_absolute_pos(Pos2 { x, y });
         let mut height = 0;
-        let strings: Vec<(i32, Vec<String>, Sprite)> = objects
+        let strings: Vec<(i32, Vec<String>, String)> = objects
             .iter()
             .map(|i| {
                 let (mut dh, cons) = self.text_get_height_and_lines(
@@ -1484,12 +1490,12 @@ impl SysHandle {
                     drop_shadow: self.theme.shadows,
                     outline: self.theme.outline,
                 });
-                self.queue.push(DrawCall::DrawSprite {
+                self.queue.push(DrawCall::DrawImage {
                     x: pos.x,
                     y: pos.y + (i.0 - self.get_thumbnail_size()) / 2,
                     w: self.get_thumbnail_size(),
                     h: self.get_thumbnail_size(),
-                    contents: i.2,
+                    contents_ident: i.2,
                 });
                 let mut current = pos;
                 current.x += self.get_thumbnail_size() + 5;
@@ -1589,7 +1595,7 @@ impl SysHandle {
         upside_down: bool,
         objects: &[T],
         as_string: impl Fn(&T) -> String,
-        as_image: impl Fn(&T) -> Sprite,
+        as_image: impl Fn(&T) -> String,
     ) -> Option<usize> {
         let amnt = if let Some(k) = self.scroll_box_data.get(name) {
             *k
@@ -1668,7 +1674,7 @@ impl SysHandle {
         upside_down: bool,
         objects: &[T],
         as_string: impl Fn(&T) -> String,
-        as_image: impl Fn(&T) -> Sprite,
+        as_image: impl Fn(&T) -> String,
     ) -> Option<usize> {
         self.draw_button_image_scroll_box_saved_exp(
             name,
@@ -1682,6 +1688,134 @@ impl SysHandle {
             as_string,
             as_image,
         )
+    }
+
+    pub fn get_theme(&self) -> Theme {
+        self.theme
+    }
+
+    pub fn get_theme_ref(&self) -> &Theme {
+        &self.theme
+    }
+
+    pub fn get_theme_mut(&mut self) -> &mut Theme {
+        &mut self.theme
+    }
+
+    //if a sprite was clicked returns where it was globally and its id, if a tile was clicked returns its indexes.
+    pub fn draw_tile_map_exp(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        map: &TileMap,
+        draw_hidden: bool,
+    ) -> (Option<Pos2>, Option<(u16, Pos2)>) {
+        let start_x = map.center_x - map.draw_width / 2;
+        let start_y = map.center_y - map.draw_height / 2;
+        let xshift = w as f64 / map.draw_width as f64;
+        let yshift = h as f64 / map.draw_height as f64;
+        let mut dx;
+        let mut dy;
+        let pos = self.get_absolute_pos(Pos2 { x, y });
+        let mut hit = None;
+        let mut out = None;
+        self.queue.push(DrawCall::Rectangle {
+            x: pos.x - 1,
+            y: pos.y - 1,
+            w: w + 2,
+            h: h + 2,
+            color: self.theme.background_color,
+            drop_shadow: self.theme.shadows,
+            outline: self.theme.outline,
+        });
+        for i in 0..LAYER_COUNT {
+            dx = x as f64;
+            dy = y as f64;
+            if i == HIDDEN_LAYER && !draw_hidden {
+                continue;
+            }
+            for y in start_y..start_y + map.draw_height {
+                for x in start_x..start_x + map.draw_width {
+                    let tile = map.get_tile(i, x, y);
+                    let xp = dx;
+                    let yp = dy;
+                    if self.user_input.left_mouse_pressed {
+                        let rct = Rect {
+                            x: xp as i32,
+                            y: yp as i32,
+                            w: xshift as i32,
+                            h: yshift as i32,
+                        };
+                        if rct.check_collision(Pos2 {
+                            x: self.user_input.mouse_x,
+                            y: self.user_input.mouse_y,
+                        }) {
+                            hit = Some(Pos2 { x, y });
+                        }
+                    }
+
+                    dx += xshift;
+                    dy += yshift;
+                    let Some(name) = map.data.draw_table.get(tile as usize) else {
+                        continue;
+                    };
+                    let dc = DrawCall::DrawImage {
+                        x: xp as i32,
+                        y: yp as i32,
+                        h: yshift as i32,
+                        w: xshift as i32,
+                        contents_ident: name,
+                    };
+                    self.queue.push(dc);
+                }
+            }
+        }
+        for i in 0..LAYER_COUNT {
+            if i == HIDDEN_LAYER && !draw_hidden {
+                continue;
+            }
+            for (id, sprite) in &map.data.sprites {
+                if sprite.layer as usize != i {
+                    continue;
+                }
+                let px = (sprite.x_pos as i32 - start_x) as f64 / xshift;
+                let py = (sprite.y_pos as i32 - start_y) as f64 / yshift;
+                let dx = px as i32 + x;
+                let dy = py as i32 + y;
+                let width = (sprite.width as f64 / xshift) as i32;
+                let height = (sprite.height as f64 / yshift) as i32;
+                let rect = Rect {
+                    x: dx,
+                    y: dy,
+                    w: width,
+                    h: height,
+                };
+                if rect.check_collision(Pos2 {
+                    x: self.get_mouse_x(),
+                    y: self.get_mouse_y(),
+                }) {
+                    out = Some((
+                        *id,
+                        Pos2 {
+                            x: self.get_mouse_x(),
+                            y: self.get_mouse_y(),
+                        },
+                    ));
+                }
+                let name = map.data.name_table.get(&sprite.image_id).unwrap().clone();
+                let dc = DrawCall::DrawImage {
+                    x: dx,
+                    y: dy,
+                    h: height,
+                    w: width,
+                    contents_ident: name,
+                };
+                self.queue.push(dc);
+            }
+        }
+        (hit, out)
     }
 }
 
@@ -1927,15 +2061,15 @@ impl DosRt {
             } => {
                 draw.draw_text(&contents, x, y, size, color.as_rl_color());
             }
-            DrawCall::DrawSprite {
+            DrawCall::DrawImage {
                 x,
                 y,
                 h,
                 w,
-                contents,
+                contents_ident,
             } => {
-                let Some(tex) = map.get(&contents.name) else {
-                    to_load.push(contents.name.clone());
+                let Some(tex) = map.get(&contents_ident) else {
+                    to_load.push(contents_ident.clone());
                     return Some(());
                 };
                 draw.draw_texture_pro(
@@ -2126,4 +2260,187 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
     let tj = std::thread::spawn(move || fn_main(sys));
     rt.run_loop(handle, thread);
     tj.join().unwrap();
+}
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct Sprite {
+    //please don't write to this :3, thank you
+    pub id: u16,
+    pub x_pos: i16,
+    pub y_pos: i16,
+    pub width: u16,
+    pub height: u16,
+    pub image_id: u16,
+    pub display_name: u16,
+    pub layer: u8,
+}
+
+pub const BACKGROUND_LAYER: usize = 0;
+pub const TILE_LAYER: usize = 1;
+pub const HIDDEN_LAYER: usize = 2;
+pub const FOREGROUND_LAYER: usize = 3;
+pub const LAYER_COUNT: usize = 4;
+
+#[repr(C)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TileMapData {
+    //in drawn order
+    layers: [Arc<[AtomicU16]>; LAYER_COUNT],
+    draw_table: SharedList<String>,
+    //in drawn order
+    sprites: BTreeMap<u16, Sprite>,
+    name_table: BTreeMap<u16, String>,
+    map_width: i32,
+    map_height: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TileMap {
+    data: TileMapData,
+    draw_width: i32,
+    draw_height: i32,
+    center_x: i32,
+    center_y: i32,
+}
+
+impl TileMap {
+    pub fn new(width: i32, height: i32, draw_table: SharedList<String>) -> Self {
+        let mut dc1 = Vec::new();
+        for _ in 0..width * height {
+            dc1.push(AtomicU16::new(0));
+        }
+        let mut dc2 = Vec::new();
+        for _ in 0..width * height {
+            dc2.push(AtomicU16::new(0));
+        }
+        let mut dc3 = Vec::new();
+        for _ in 0..width * height {
+            dc3.push(AtomicU16::new(0));
+        }
+        let mut dc4 = Vec::new();
+        for _ in 0..width * height {
+            dc4.push(AtomicU16::new(0));
+        }
+        let layers = [dc1.into(), dc2.into(), dc3.into(), dc4.into()];
+        Self {
+            draw_width: width,
+            draw_height: height,
+            center_x: width / 2,
+            center_y: height / 2,
+            data: TileMapData {
+                map_width: width,
+                map_height: height,
+                layers,
+                draw_table: draw_table,
+                sprites: BTreeMap::new(),
+                name_table: BTreeMap::new(),
+            },
+        }
+    }
+
+    pub fn get_tile(&self, layer: usize, x: i32, y: i32) -> u16 {
+        self.data.layers[layer][(y * self.data.map_width + x) as usize]
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn set_tile<T: Into<u16>>(&self, layer: usize, x: i32, y: i32, to: T) {
+        self.data.layers[layer][(y * self.data.map_width + x) as usize]
+            .store(to.into(), std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn create_sprite(
+        &mut self,
+        pos_x: i32,
+        pos_y: i32,
+        w: i32,
+        h: i32,
+        img: u16,
+        layer: usize,
+    ) -> u16 {
+        let mut id = 1;
+        for i in 1..=u16::MAX {
+            id = i;
+            if !self.data.sprites.contains_key(&i) {
+                break;
+            }
+        }
+        if id == u16::MAX {
+            0
+        } else {
+            let s = Sprite {
+                id,
+                x_pos: pos_x as i16,
+                y_pos: pos_y as i16,
+                width: w as u16,
+                height: h as u16,
+                image_id: img,
+                display_name: 0,
+                layer: layer as u8,
+            };
+            self.data.sprites.insert(id, s);
+            id
+        }
+    }
+
+    pub fn get_sprite(&self, id: u16) -> Sprite {
+        self.data.sprites[&id]
+    }
+
+    pub fn set_sprite(&mut self, id: u16, sprite: Sprite) {
+        *self.data.sprites.get_mut(&id).unwrap() = sprite;
+    }
+
+    pub fn delete_sprite(&mut self, id: u16) {
+        self.data.sprites.remove(&id);
+    }
+
+    pub fn check_sprite_exists(&self, id: u16) -> bool {
+        self.data.sprites.contains_key(&id)
+    }
+
+    pub fn get_image_id(&self, name: &str) -> Option<u16> {
+        for i in 0..self.data.draw_table.len() {
+            if let Some(x) = self.data.draw_table.get(i) {
+                if &x == name {
+                    return Some(i as u16);
+                }
+            } else {
+                break;
+            }
+        }
+        None
+    }
+
+    //no u cannot unload images, l+ratio
+    pub fn load_image(&self, name: &str) -> u16 {
+        let idx = self.data.draw_table.push(name.to_string());
+        idx as u16
+    }
+
+    pub fn get_map_dimensions(&self) -> (i32, i32) {
+        (self.data.map_width, self.data.map_height)
+    }
+
+    pub fn get_view_dimensions(&self) -> (i32, i32) {
+        (self.draw_width, self.draw_height)
+    }
+
+    pub fn set_view_dimensions(&mut self, w: i32, h: i32) {
+        self.draw_width = w;
+        self.draw_height = h;
+    }
+
+    pub fn get_view_center(&self) -> Pos2 {
+        Pos2 {
+            x: self.center_x,
+            y: self.center_y,
+        }
+    }
+
+    pub fn set_view_center(&mut self, x: i32, y: i32) {
+        self.center_x = x;
+        self.center_y = y;
+    }
 }
