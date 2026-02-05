@@ -1823,25 +1823,29 @@ pub struct Dos {
     pub image: Image,
     pub render_texture: Option<RenderTexture2D>,
     pub loaded_textures: HashMap<String, Texture2D>,
+    pub shader: Option<Shader>,
     pub w: i32,
     pub h: i32,
 }
 
 impl Dos {
     pub fn draw(&mut self, handle: &mut RaylibDrawHandle, _thread: &RaylibThread) {
-        handle.draw_texture_pro(
-            self.render_texture.as_ref().unwrap(),
-            Rectangle::new(0.0, 0.0, SCREEN_WIDTH as f32, -(SCREEN_HEIGHT as f32)),
-            Rectangle::new(0.0, 0.0, self.w as f32, self.h as f32),
-            Vector2::zero(),
-            0.0,
-            Color::WHITE,
-        );
+        handle.draw_shader_mode(self.shader.as_mut().unwrap(), |mut handle| {
+            handle.draw_texture_pro(
+                self.render_texture.as_ref().unwrap(),
+                Rectangle::new(0.0, 0.0, SCREEN_WIDTH as f32, -(SCREEN_HEIGHT as f32)),
+                Rectangle::new(0.0, 0.0, self.w as f32, self.h as f32),
+                Vector2::zero(),
+                0.0,
+                Color::WHITE,
+            );
+        });
     }
 
     pub fn new() -> Self {
         Self {
             image: Image::gen_image_color(SCREEN_WIDTH, SCREEN_HEIGHT, Color::WHITE),
+            shader: None,
             render_texture: None,
             loaded_textures: HashMap::new(),
             w: SCREEN_WIDTH,
@@ -2189,6 +2193,7 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
         .unwrap();
     let mut rt = DosRt {
         dos: Dos {
+            shader: Some(handle.load_shader(&thread, None, Some("./src/retro.glsl"))),
             loaded_textures: HashMap::new(),
             image: Image::gen_image_color(SCREEN_WIDTH, SCREEN_HEIGHT, Color::BLACK),
             render_texture: Some(text),
@@ -2286,6 +2291,7 @@ pub const LAYER_COUNT: usize = 4;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TileMapData {
     //in drawn order
+    background: String,
     layers: [Arc<[AtomicU16]>; LAYER_COUNT],
     draw_table: SharedList<String>,
     //in drawn order
@@ -2306,7 +2312,12 @@ pub struct TileMap {
 }
 
 impl TileMap {
-    pub fn new(width: i32, height: i32, draw_table: SharedList<String>) -> Self {
+    pub fn new(
+        width: i32,
+        height: i32,
+        background: String,
+        draw_table: SharedList<String>,
+    ) -> Self {
         let mut dc1 = Vec::new();
         for _ in 0..width * height {
             dc1.push(AtomicU16::new(0));
@@ -2330,6 +2341,7 @@ impl TileMap {
             center_x: width / 2,
             center_y: height / 2,
             data: TileMapData {
+                background,
                 map_width: width,
                 map_height: height,
                 layers,
