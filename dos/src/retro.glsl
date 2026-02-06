@@ -12,21 +12,24 @@ uniform float scanline;
 out vec4 finalColor;
 float cbrt256 = 6.34960420787;
 float div = 6.0;
+uniform vec4 pallete[256];
 // NOTE: Add your custom variables here
-float post_process_color_rg(float c) {
-  float x = c * 255.0;
-  float outx = 0.0;
-  if (x > 196) {
-    outx = 255.0;
-  } else if (x > 98) {
-    outx = 128.0;
+
+vec3 nearest_rgb_to_pallet(vec3 col) {
+  vec3 nearest = pallete[0].rgb;
+  float min_delta = dot(col, nearest);
+  min_delta *= min_delta;
+  for (int i = 1; i < 256; i++) {
+    float delta = dot(col, pallete[i].rgb);
+    delta *= delta;
+    if (delta < min_delta) {
+      min_delta = delta;
+      nearest = pallete[i].rgb;
+    }
   }
-  if (x >) {
-    outx = 255.0;
-  } else if (x > 98) {
-    outx = 128.0;
-  }
+  return nearest;
 }
+
 void main() {
   // Texel color fetching from texture sampler
   // vec4 texelColor = texture(texture0, fragTexCoord);
@@ -39,10 +42,8 @@ void main() {
   // finalColor = texelColor * colDiffuse * fragColor;
 
   vec4 base = texture(texture0, fragTexCoord);
-  vec4 col;
-  col.r = post_process_color(base.r);
-  col.g = post_process_color(base.g);
-  col.b = post_process_color(base.b);
+  vec4 col = vec4(0.0, 0.0, 0.0, 1.0);
+  col.rgb = nearest_rgb_to_pallet(base.rgb);
   col.a = base.a;
   float h = fragTexCoord.y * 480.0;
   float p = 480 - scanline * 480;

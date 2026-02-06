@@ -2214,7 +2214,7 @@ where {
             Self {
                 buf: arena.alloc_bytes(16, 1),
                 len: 0,
-                arena: arena,
+                arena,
             }
         }
 
