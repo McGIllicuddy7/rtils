@@ -66,6 +66,7 @@ impl Dos {
         }
     }
 
+    #[allow(unused)]
     pub fn setup(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
         self.render_texture = Some(
             handle

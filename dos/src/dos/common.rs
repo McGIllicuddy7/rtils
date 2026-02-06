@@ -254,7 +254,7 @@ impl Pallete {
         i += 1;
         colors[i] = BColor::from_rl_color(Color::RED); //5
         i += 1;
-        colors[i] = BColor::from_rl_color(Color::YELLOW); //6
+        colors[i] = BColor::from_rl_color(Color::DARKMAGENTA); //6
         i += 1;
         colors[i] = BColor::from_rl_color(Color::PURPLE); //7
         i += 1;
