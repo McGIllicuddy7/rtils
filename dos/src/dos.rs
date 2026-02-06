@@ -1826,10 +1826,22 @@ pub struct Dos {
     pub shader: Option<Shader>,
     pub w: i32,
     pub h: i32,
+    pub scan_line: i32,
 }
 
 impl Dos {
     pub fn draw(&mut self, handle: &mut RaylibDrawHandle, _thread: &RaylibThread) {
+        let loc = self
+            .shader
+            .as_ref()
+            .unwrap()
+            .get_shader_location("scanline");
+        self.shader
+            .as_mut()
+            .unwrap()
+            .set_shader_value(loc, self.scan_line as f32 / (self.h as f32));
+        self.scan_line += 1;
+        self.scan_line %= self.h;
         handle.draw_shader_mode(self.shader.as_mut().unwrap(), |mut handle| {
             handle.draw_texture_pro(
                 self.render_texture.as_ref().unwrap(),
@@ -1850,6 +1862,7 @@ impl Dos {
             loaded_textures: HashMap::new(),
             w: SCREEN_WIDTH,
             h: SCREEN_HEIGHT,
+            scan_line: 0,
         }
     }
 
@@ -2183,22 +2196,30 @@ pub fn setup(fn_main: impl FnOnce(SysHandle) + Send + 'static) {
 
     let (mut handle, thread) = raylib::init().title("bridget").build();
 
-    let h = raylib::window::get_monitor_height(0) - 100;
+    let h = raylib::window::get_monitor_height(0);
     println!("{}", h);
-    let w = (4 * h) / 3;
+    let w = get_monitor_width(0);
     handle.set_window_size(w, h);
-    handle.set_window_position(50, 50);
+    handle.set_window_focused();
+    _ = handle.begin_drawing(&thread);
+    //handle.set_window_position(50, 50);
+
     let text = handle
         .load_render_texture(&thread, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
         .unwrap();
     let mut rt = DosRt {
         dos: Dos {
-            shader: Some(handle.load_shader(&thread, None, Some("./src/retro.glsl"))),
+            shader: Some(handle.load_shader(
+                &thread,
+                Some("./src/vert.glsl"),
+                Some("./src/retro.glsl"),
+            )),
             loaded_textures: HashMap::new(),
             image: Image::gen_image_color(SCREEN_WIDTH, SCREEN_HEIGHT, Color::BLACK),
             render_texture: Some(text),
             h,
             w,
+            scan_line: 0,
         },
         cmd_pipeline: cmd1,
         frame: Vec::new(),
