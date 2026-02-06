@@ -84,36 +84,11 @@ impl SysHandle {
             div_stack: Vec::new(),
             queue: Vec::new(),
             theme: Theme {
-                background_color: BColor {
-                    r: 32,
-                    g: 32,
-                    b: 32,
-                    a: 255,
-                },
-                object_color: BColor {
-                    r: 64,
-                    g: 64,
-                    b: 64,
-                    a: 255,
-                },
-                object_pressed_color: BColor {
-                    r: 48,
-                    g: 48,
-                    b: 48,
-                    a: 255,
-                },
-                text_color: BColor {
-                    r: 192,
-                    g: 192,
-                    b: 192,
-                    a: 255,
-                },
-                decoration_color: BColor {
-                    r: 192,
-                    g: 160,
-                    b: 160,
-                    a: 255,
-                },
+                background_color: BColor::from_rl_color(Color::BLACK),
+                object_color: BColor::from_rl_color(Color::DARKGRAY),
+                object_pressed_color: BColor::from_rl_color(Color::DIMGRAY),
+                text_color: BColor::from_rl_color(Color::WHITE),
+                decoration_color: BColor::from_rl_color(Color::BLUE),
                 shadows: false,
                 outline: true,
             },
@@ -619,7 +594,7 @@ impl SysHandle {
         self.cx = 0;
         self.cy = 0;
         self.ui_mode = SysUiMode::Sequential;
-        std::thread::sleep(Duration::from_millis(8));
+        std::thread::sleep(Duration::from_millis(16));
     }
 
     pub fn set_cursor(&mut self, x: i32, y: i32) {

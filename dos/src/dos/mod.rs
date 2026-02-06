@@ -1,6 +1,6 @@
-pub mod common;
-pub mod dos;
+mod common;
+mod dos;
 pub mod handle;
-pub use common::*;
+pub use common::{BColor, Pallete};
 pub use dos::setup;
 pub use handle::*;

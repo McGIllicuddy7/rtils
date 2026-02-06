@@ -1,13 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{
-    SysHandle,
-    rtils::rtils_useful::BPipe,
-};
+use crate::{SysHandle, rtils::rtils_useful::BPipe};
 
 use super::common::*;
 pub struct Dos {
-    pub image: Image,
+    pub pallete: Pallete,
     pub render_texture: Option<RenderTexture2D>,
     pub loaded_textures: HashMap<String, Texture2D>,
     pub shader: Option<Shader>,
@@ -33,6 +30,11 @@ impl Dos {
             .as_mut()
             .unwrap()
             .set_shader_value(loc, self.scan_line as f32 / (self.h as f32));
+        let ploc = self.shader.as_ref().unwrap().get_shader_location("pallete");
+        self.shader
+            .as_mut()
+            .unwrap()
+            .set_shader_value_v(ploc, &self.pallete.as_rl_vec());
         self.scan_line += 1;
         self.scan_line %= self.h;
         handle.draw_shader_mode(self.shader.as_mut().unwrap(), |mut handle| {
@@ -49,7 +51,12 @@ impl Dos {
 
     pub fn new() -> Self {
         Self {
-            image: Image::gen_image_color(SCREEN_WIDTH, SCREEN_HEIGHT, Color::WHITE),
+            pallete: Pallete::new(BColor {
+                r: 255,
+                g: 255,
+                b: 0,
+                a: 255,
+            }),
             shader: None,
             render_texture: None,
             loaded_textures: HashMap::new(),
@@ -164,9 +171,12 @@ impl DosRt {
         }
         self.input.left_mouse_down = handle.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
         self.input.right_mouse_down = handle.is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT);
-        self.input.left_mouse_pressed = handle.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
-        self.input.left_mouse_released = handle.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT);
-        self.input.right_mouse_released = handle.is_mouse_button_released(MouseButton::MOUSE_BUTTON_RIGHT);
+        self.input.left_mouse_pressed =
+            handle.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
+        self.input.left_mouse_released =
+            handle.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT);
+        self.input.right_mouse_released =
+            handle.is_mouse_button_released(MouseButton::MOUSE_BUTTON_RIGHT);
         if handle.is_key_pressed(KeyboardKey::KEY_BACKSPACE) {
             self.input.pressed_keys.push(127 as char);
         }
@@ -190,7 +200,7 @@ impl DosRt {
         let mut drw = handle.begin_drawing(thread);
         drw.clear_background(Color::BLACK);
         self.dos.draw(&mut drw, thread);
-        //  drw.draw_fps(100, 100);
+        // drw.draw_fps(100, 100);
     }
 
     pub fn run_draw_call<T>(
@@ -377,7 +387,12 @@ pub fn setup(fn_main: impl FnOnce(super::SysHandle) + Send + 'static) {
                 Some("./src/retro.glsl"),
             )),
             loaded_textures: HashMap::new(),
-            image: Image::gen_image_color(SCREEN_WIDTH, SCREEN_HEIGHT, Color::BLACK),
+            pallete: Pallete::new(BColor {
+                r: 0,
+                g: 255,
+                b: 255,
+                a: 0,
+            }),
             render_texture: Some(text),
             h,
             w,

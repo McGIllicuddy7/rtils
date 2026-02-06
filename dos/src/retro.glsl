@@ -14,19 +14,51 @@ float cbrt256 = 6.34960420787;
 float div = 6.0;
 uniform vec4 pallete[256];
 // NOTE: Add your custom variables here
-
+float col_dif(vec3 c1, vec3 c2) {
+  float dv = (length(c1) - length(c2));
+  dv *= dv;
+  dv = sqrt(dv);
+  if (length(c1) == 0 || length(c2) == 0) {
+    return dv;
+  }
+  float dt = (1 - dot(normalize(c1), normalize(c2))) / 2.0;
+  return sqrt(dt) + dv;
+}
 vec3 nearest_rgb_to_pallet(vec3 col) {
   vec3 nearest = pallete[0].rgb;
-  float min_delta = dot(col, nearest);
-  min_delta *= min_delta;
-  for (int i = 1; i < 256; i++) {
-    float delta = dot(col, pallete[i].rgb);
-    delta *= delta;
+  float min_delta = col_dif(col, nearest);
+  float l = length(col);
+  int base = 0;
+  if (length(col) > 1) {
+    base = 3 * 64;
+  } else if (length(col) > 0.6) {
+    base = 2 * 64;
+  } else if (length(col) > 0.3) {
+    base = 64;
+  } else {
+    base = 0;
+  }
+  for (int i = base; i < base + 64; i += 1) {
+    float delta = col_dif(col, pallete[i].rgb);
+    if (col == pallete[i].rgb) {
+      return pallete[i].rgb;
+    }
     if (delta < min_delta) {
       min_delta = delta;
       nearest = pallete[i].rgb;
     }
   }
+  for (int i = 256 - 16; i < 256; i += 1) {
+    float delta = col_dif(col, pallete[i].rgb);
+    if (col == pallete[i].rgb) {
+      return pallete[i].rgb;
+    }
+    if (delta < min_delta) {
+      min_delta = delta;
+      nearest = pallete[i].rgb;
+    }
+  }
+
   return nearest;
 }
 
