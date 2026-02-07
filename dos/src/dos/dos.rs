@@ -198,6 +198,9 @@ impl DosRt {
             handle.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         self.input.left_mouse_released =
             handle.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT);
+        self.input.right_mouse_pressed =
+            handle.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT);
+
         self.input.right_mouse_released =
             handle.is_mouse_button_released(MouseButton::MOUSE_BUTTON_RIGHT);
         if handle.is_key_pressed(KeyboardKey::KEY_BACKSPACE) {

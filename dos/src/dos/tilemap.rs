@@ -368,7 +368,6 @@ impl TileMap {
                 w,
                 h,
             );
-
             if handle.left_mouse_pressed() {
                 for (id, sprite) in &self.data.sprites {
                     if sprite.x_pos == x && sprite.y_pos == y {

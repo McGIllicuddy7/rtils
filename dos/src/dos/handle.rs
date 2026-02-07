@@ -1143,7 +1143,7 @@ impl SysHandle {
     }
 
     pub fn left_mouse_pressed(&self) -> bool {
-        self.user_input.left_arrow_pressed
+        self.user_input.left_mouse_pressed
     }
 
     pub fn left_mouse_released(&self) -> bool {

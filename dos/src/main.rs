@@ -14,9 +14,7 @@ pub fn main_func(mut handle: SysHandle) {
         handle.begin_div(800, 600);
         let (clicked, selected) = map.draw(300, 50, 500, 500, &mut handle, false);
         handle.end_div();
-        if clicked.is_some() || selected.is_some() {
-            println!("{:#?}, {:#?}", clicked, selected);
-        }
+        if clicked.is_some() || selected.is_some() {}
         handle.end_drawing();
     }
 }
