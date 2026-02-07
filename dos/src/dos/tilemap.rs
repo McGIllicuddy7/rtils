@@ -217,8 +217,8 @@ impl TileMap {
         let xshift = w as f64 / self.draw_width as f64;
         let yshift = h as f64 / self.draw_height as f64;
         return (
-            ((x as i32 - base_x + start_x) as f64 / xshift) as i16,
-            ((y as i32 - base_y + start_y) as f64 / yshift) as i16,
+            ((x as i32 - base_x - start_x) as f64 / xshift) as i16,
+            ((y as i32 - base_y - start_y) as f64 / yshift) as i16,
         );
     }
     //if a sprite was clicked returns where it was globally and its id, if a tile was clicked returns its indexes.
@@ -369,7 +369,7 @@ impl TileMap {
                 h,
             );
 
-            if handle.left_mouse_down() {
+            if handle.left_mouse_pressed() {
                 for (id, sprite) in &self.data.sprites {
                     if sprite.x_pos == x && sprite.y_pos == y {
                         self.selected = Some(*id);
@@ -391,8 +391,6 @@ impl TileMap {
                     s.x_pos = x;
                     s.y_pos = y;
                     self.set_sprite(con, s);
-                    println!("moved to:{},{}", x, y);
-                    todo!();
                 }
                 self.selected = None;
             }

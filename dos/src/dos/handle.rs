@@ -565,18 +565,27 @@ impl SysHandle {
 
     pub fn begin_drawing(&mut self) {
         self.user_input.reset();
-        yield_now();
-        while let Ok(Some(x)) = self.handle.recieve() {
-            match x {
-                DrawCall::Update { input } => {
-                    self.user_input = input;
-                }
-                DrawCall::Exiting => {
-                    self.should_exit = true;
-                    break;
-                }
-                _ => {
-                    continue;
+        let mut hit = false;
+        while !hit {
+            if self.bootstrap {
+                self.bootstrap = false;
+                break;
+            }
+            yield_now();
+            while let Ok(Some(x)) = self.handle.recieve() {
+                match x {
+                    DrawCall::Update { input } => {
+                        hit = true;
+                        self.user_input = input;
+                    }
+                    DrawCall::Exiting => {
+                        hit = true;
+                        self.should_exit = true;
+                        break;
+                    }
+                    _ => {
+                        continue;
+                    }
                 }
             }
         }
@@ -600,7 +609,7 @@ impl SysHandle {
         self.cx = 0;
         self.cy = 0;
         self.ui_mode = SysUiMode::Sequential;
-        std::thread::sleep(Duration::from_millis(16));
+        std::thread::sleep(Duration::from_millis(12));
     }
 
     pub fn set_cursor(&mut self, x: i32, y: i32) {

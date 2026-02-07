@@ -38,7 +38,7 @@ impl Dos {
             handle.draw_texture_pro(
                 self.render_texture.as_ref().unwrap(),
                 Rectangle::new(0.0, 0.0, SCREEN_WIDTH as f32, -(SCREEN_HEIGHT as f32)),
-                Rectangle::new(0.0, 0.0, self.w as f32, self.h as f32),
+                Rectangle::new(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32),
                 Vector2::zero(),
                 0.0,
                 Color::WHITE,
