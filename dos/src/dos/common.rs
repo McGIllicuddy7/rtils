@@ -1,7 +1,10 @@
 pub use raylib::prelude::*;
 pub use serde::{Deserialize, Serialize};
 pub use std::sync::Arc;
-use std::{f32, f64};
+use std::{
+    f32,
+    f64::{self, consts::TAU},
+};
 pub const SCREEN_WIDTH: i32 = 1200;
 pub const SCREEN_HEIGHT: i32 = 900;
 pub const DEFAULT_THUMBNAIL_SIZE: i32 = 80;
@@ -68,7 +71,7 @@ pub enum DrawCall {
         drop_shadow: bool,
         outline: bool,
     },
-    DrawPixels {
+    DrawVectors {
         points: Vec<(Pos2, BColor)>,
         width: f32,
     },
@@ -194,6 +197,14 @@ pub struct Pallete {
     pub colors: [BColor; 256],
 }
 impl Pallete {
+    pub fn basic() -> Self {
+        Self::new(BColor {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255,
+        })
+    }
     pub fn new(seed: BColor) -> Self {
         let hsv = raylib::color::Color::color_to_hsv(&seed.as_rl_color());
         let theta = if hsv.z == 0.0 || hsv.y == 0.0 {
@@ -203,10 +214,8 @@ impl Pallete {
         };
         let mut thetas = [0.0; 15];
         for i in 0..15 {
-            thetas[i] = ((theta as f64 + 2.0 * f64::consts::PI / (15.0) * i as f64) as f32)
-                / (f32::consts::TAU);
+            thetas[i] = (theta as f64 + i as f64 * 360.0 / 16.0);
         }
-
         let mut colors = [BColor {
             r: 0,
             g: 0,
@@ -228,18 +237,18 @@ impl Pallete {
                 let sat = if saturation == 3 {
                     1.0
                 } else if saturation == 2 {
-                    0.5
+                    0.75
                 } else if saturation == 1 {
-                    0.25
+                    0.5
                 } else {
-                    0.0
+                    0.25
                 };
                 for hue in 0..15 {
                     let h = thetas[hue];
                     let s = sat;
                     let v = bv;
                     colors[i] =
-                        BColor::from_rl_color(raylib::color::Color::color_from_hsv(h, s, v));
+                        BColor::from_rl_color(raylib::color::Color::color_from_hsv(h as f32, s, v));
                     i += 1;
                 }
             }

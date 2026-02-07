@@ -1,11 +1,10 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::atomic::AtomicU16,
     thread::yield_now,
     time::Duration,
 };
 
-use crate::rtils::rtils_useful::{BPipe, SharedList};
+use crate::rtils::rtils_useful::BPipe;
 
 use super::common::*;
 
@@ -438,7 +437,7 @@ impl SysHandle {
                 max.y = x.y;
             }
         });
-        self.queue.push(DrawCall::DrawPixels {
+        self.queue.push(DrawCall::DrawVectors {
             points: mpoints,
             width,
         });
@@ -706,7 +705,7 @@ impl SysHandle {
             drop_shadow: false,
             outline: true,
         });
-        self.queue.push(DrawCall::DrawPixels {
+        self.queue.push(DrawCall::DrawVectors {
             points: vec![
                 (
                     Pos2 { x: bx.x, y: base.y },
@@ -865,7 +864,7 @@ impl SysHandle {
             drop_shadow: false,
             outline: true,
         });
-        self.queue.push(DrawCall::DrawPixels {
+        self.queue.push(DrawCall::DrawVectors {
             points: vec![
                 (
                     Pos2 { x: bx.x, y: base.y },
@@ -1176,8 +1175,8 @@ impl SysHandle {
 
     pub fn get_mouse_pos(&self) -> Pos2 {
         Pos2 {
-            x: self.cx,
-            y: self.cy,
+            x: self.user_input.mouse_x,
+            y: self.user_input.mouse_y,
         }
     }
 
@@ -1378,7 +1377,7 @@ impl SysHandle {
             drop_shadow: false,
             outline: true,
         });
-        self.queue.push(DrawCall::DrawPixels {
+        self.queue.push(DrawCall::DrawVectors {
             points: vec![
                 (
                     Pos2 { x: bx.x, y: base.y },

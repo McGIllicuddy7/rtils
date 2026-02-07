@@ -257,7 +257,7 @@ impl DosRt {
                 }
                 draw.draw_rectangle(x, y, w, h, color.as_rl_color());
             }
-            DrawCall::DrawPixels { points, width } => {
+            DrawCall::DrawVectors { points, width } => {
                 for i in 0..points.len() - 1 {
                     let v1 = points[i].0;
                     let v2 = points[i + 1].0;
@@ -421,12 +421,7 @@ pub fn setup(fn_main: impl FnOnce(super::SysHandle) + Send + 'static) {
                 Some("./src/retro.glsl"),
             )),
             loaded_textures: HashMap::new(),
-            pallete: Pallete::new(BColor {
-                r: 0,
-                g: 255,
-                b: 255,
-                a: 0,
-            }),
+            pallete: Pallete::basic(),
             render_texture: Some(text),
             canvas: Some(canvas),
             h,

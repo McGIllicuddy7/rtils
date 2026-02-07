@@ -80,22 +80,23 @@ void main() {
   vec4 col = vec4(0.0, 0.0, 0.0, 1.0);
   col.rgb = nearest_rgb_to_pallet(base.rgb);
   col.a = base.a;
-  float h = fragTexCoord.y * 480.0;
-  float p = 480 - scanline * 480;
+  float count = 600;
+  float h = fragTexCoord.y * count;
+  float p = count - scanline * count;
   float line_delta = abs(round(h) - h);
-  if (line_delta < 0.3) {
-    if (line_delta < 0.05) {
-      line_delta = 0.05;
+  if (line_delta < 0.5) {
+    if (line_delta < 0.01) {
+      line_delta = 0.01;
     }
-    col.rgb += (1. / line_delta * sqrt(line_delta)) * 0.01;
+    col.rgb += (1. / line_delta * sqrt(line_delta)) * 0.005;
   }
-  if (abs(h - p) < 0.5) {
+  if (abs(h - p) < 0.7) {
     float delt = abs(h - p);
     delt *= 10;
     if (delt < 0.1) {
       delt = 0.1;
     }
-    col.rgb += (1. / (delt * sqrt(delt))) * 0.05;
+    col.rgb += (1. / (delt * sqrt(delt))) * 0.005;
     col.rgb *= 1.0;
   }
   finalColor = col;

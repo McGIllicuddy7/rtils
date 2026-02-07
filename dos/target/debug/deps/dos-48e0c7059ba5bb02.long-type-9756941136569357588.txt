@@ -1,1 +1,0 @@
-(std::option::Option<std::string::String>, std::string::String, bool, i32, std::option::Option<(i32, i32)>)
