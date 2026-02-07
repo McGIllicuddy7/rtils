@@ -391,6 +391,8 @@ impl TileMap {
                     s.x_pos = x;
                     s.y_pos = y;
                     self.set_sprite(con, s);
+                    println!("moved to:{},{}", x, y);
+                    todo!();
                 }
                 self.selected = None;
             }

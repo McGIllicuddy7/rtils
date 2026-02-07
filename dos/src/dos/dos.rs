@@ -6,6 +6,7 @@ use super::common::*;
 pub struct Dos {
     pub pallete: Pallete,
     pub render_texture: Option<RenderTexture2D>,
+    pub canvas: Option<RenderTexture2D>,
     pub loaded_textures: HashMap<String, Texture2D>,
     pub shader: Option<Shader>,
     pub w: i32,
@@ -30,14 +31,10 @@ impl Dos {
             .as_mut()
             .unwrap()
             .set_shader_value(loc, self.scan_line as f32 / (self.h as f32));
-        let ploc = self.shader.as_ref().unwrap().get_shader_location("pallete");
-        self.shader
-            .as_mut()
-            .unwrap()
-            .set_shader_value_v(ploc, &self.pallete.as_rl_vec());
         self.scan_line += 1;
         self.scan_line %= self.h;
-        handle.draw_shader_mode(self.shader.as_mut().unwrap(), |mut handle| {
+        let mut shade = handle.begin_texture_mode(_thread, self.canvas.as_mut().unwrap());
+        shade.draw_shader_mode(self.shader.as_mut().unwrap(), |mut handle| {
             handle.draw_texture_pro(
                 self.render_texture.as_ref().unwrap(),
                 Rectangle::new(0.0, 0.0, SCREEN_WIDTH as f32, -(SCREEN_HEIGHT as f32)),
@@ -47,6 +44,15 @@ impl Dos {
                 Color::WHITE,
             );
         });
+        drop(shade);
+        handle.draw_texture_pro(
+            self.canvas.as_ref().unwrap(),
+            Rectangle::new(0.0, 0.0, SCREEN_WIDTH as f32, -(SCREEN_HEIGHT as f32)),
+            Rectangle::new(0.0, 0.0, self.w as f32, self.h as f32),
+            Vector2::zero(),
+            0.0,
+            Color::WHITE,
+        );
         handle.draw_fps(10, 10);
     }
 
@@ -60,9 +66,11 @@ impl Dos {
             }),
             shader: None,
             render_texture: None,
+            canvas: None,
             loaded_textures: HashMap::new(),
             w: SCREEN_WIDTH,
             h: SCREEN_HEIGHT,
+
             scan_line: 0,
         }
     }
@@ -148,6 +156,17 @@ impl DosRt {
     }
 
     pub fn run_loop(&mut self, mut handle: RaylibHandle, thread: RaylibThread) {
+        let ploc = self
+            .dos
+            .shader
+            .as_ref()
+            .unwrap()
+            .get_shader_location("pallete");
+        self.dos
+            .shader
+            .as_mut()
+            .unwrap()
+            .set_shader_value_v(ploc, &self.dos.pallete.as_rl_vec());
         while !self.should_exit {
             self.update_cmds(&mut handle, &thread);
             if self.should_draw {
@@ -159,7 +178,9 @@ impl DosRt {
             }
         }
         self.dos.render_texture = None;
+        self.dos.shader = None;
         self.dos.loaded_textures.clear();
+        self.dos.canvas = None;
     }
 
     pub fn draw(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
@@ -344,7 +365,11 @@ impl DosRt {
         }
         drop(draw);
         to_load.dedup();
+
         for i in to_load {
+            if self.dos.loaded_textures.contains_key(&i) {
+                continue;
+            }
             let Ok(x) = handle.load_texture(_thread, &i) else {
                 continue;
             };
@@ -382,6 +407,9 @@ pub fn setup(fn_main: impl FnOnce(super::SysHandle) + Send + 'static) {
     let text = handle
         .load_render_texture(&thread, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
         .unwrap();
+    let canvas = handle
+        .load_render_texture(&thread, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+        .unwrap();
     let mut rt = DosRt {
         dos: Dos {
             shader: Some(handle.load_shader(
@@ -397,6 +425,7 @@ pub fn setup(fn_main: impl FnOnce(super::SysHandle) + Send + 'static) {
                 a: 0,
             }),
             render_texture: Some(text),
+            canvas: Some(canvas),
             h,
             w,
             scan_line: 0,

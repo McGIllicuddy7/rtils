@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     sync::atomic::AtomicU16,
+    thread::yield_now,
     time::Duration,
 };
 
@@ -60,6 +61,7 @@ pub struct SysHandle {
     queue: Vec<DrawCall>,
     text_box_data: HashMap<String, TextBoxData>,
     scroll_box_data: HashMap<String, f32>,
+    bootstrap: bool,
 }
 impl SysHandle {
     pub fn new(
@@ -95,6 +97,7 @@ impl SysHandle {
             user_input: UserInput::new(),
             text_box_data: HashMap::new(),
             scroll_box_data: HashMap::new(),
+            bootstrap: true,
         }
     }
     pub fn get_thumbnail_size(&self) -> i32 {
@@ -562,6 +565,7 @@ impl SysHandle {
 
     pub fn begin_drawing(&mut self) {
         self.user_input.reset();
+        yield_now();
         while let Ok(Some(x)) = self.handle.recieve() {
             match x {
                 DrawCall::Update { input } => {
@@ -569,12 +573,14 @@ impl SysHandle {
                 }
                 DrawCall::Exiting => {
                     self.should_exit = true;
+                    break;
                 }
                 _ => {
                     continue;
                 }
             }
         }
+
         self.div_stack.clear();
         self.queue.clear();
         self.queue.push(DrawCall::BeginDrawing);

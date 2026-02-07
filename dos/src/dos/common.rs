@@ -6,7 +6,7 @@ pub const SCREEN_WIDTH: i32 = 1000;
 pub const SCREEN_HEIGHT: i32 = 750;
 pub const DEFAULT_THUMBNAIL_SIZE: i32 = 80;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct BColor {
     pub r: u8,
     pub g: u8,
@@ -14,13 +14,13 @@ pub struct BColor {
     pub a: u8,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pos2 {
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -52,7 +52,7 @@ impl BColor {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum DrawCall {
     BeginDrawing,
     EndDrawing,
@@ -134,7 +134,7 @@ pub struct Div {
     pub mode: SysUiMode,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct UserInput {
     pub pressed_keys: Vec<char>,
     pub mouse_x: i32,
@@ -275,7 +275,7 @@ impl Pallete {
         colors[i] = BColor::from_rl_color(Color::CYAN); //15
         i += 1;
         colors[i] = BColor::from_rl_color(Color::DARKCYAN); //16
-        
+
         //   println!("{:#?}", out);
         Self { colors }
     }
