@@ -5,9 +5,10 @@ fn main() {
 
 pub fn main_func(mut handle: SysHandle) {
     let draw_table = vec![];
-    let mut map = TileMap::new(50, 50, "bg.png".to_string(), draw_table);
+    let mut map = TileMap::new(20, 20, "bg.png".to_string(), draw_table);
     let sprite_img = map.load_image("image.png");
     let _sprite = map.create_sprite(10, 10, 1, 1, sprite_img, FOREGROUND_LAYER);
+    map.enable_mouse();
     while !handle.should_exit() {
         handle.begin_drawing();
         handle.begin_div(800, 600);

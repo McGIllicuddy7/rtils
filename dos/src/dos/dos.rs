@@ -47,6 +47,7 @@ impl Dos {
                 Color::WHITE,
             );
         });
+        handle.draw_fps(10, 10);
     }
 
     pub fn new() -> Self {

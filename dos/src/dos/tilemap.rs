@@ -312,7 +312,7 @@ impl TileMap {
                 if self
                     .selected
                     .map(|i| i == *id)
-                    .or_else(|| Some(true))
+                    .or_else(|| Some(false))
                     .unwrap()
                 {
                     continue;
@@ -332,7 +332,8 @@ impl TileMap {
                 if rect.check_collision(Pos2 {
                     x: handle.get_mouse_x(),
                     y: handle.get_mouse_y(),
-                }) {
+                }) && handle.left_mouse_pressed()
+                {
                     out = Some((
                         *id,
                         Pos2 {
@@ -340,6 +341,9 @@ impl TileMap {
                             y: handle.get_mouse_y(),
                         },
                     ));
+                    if self.allow_mouse_input {
+                        self.selected = Some(*id);
+                    }
                 }
                 if sprite.image_id == 0 {
                     continue;
@@ -364,12 +368,11 @@ impl TileMap {
                 w,
                 h,
             );
-            if handle.left_mouse_pressed() {
+
+            if handle.left_mouse_down() {
                 for (id, sprite) in &self.data.sprites {
                     if sprite.x_pos == x && sprite.y_pos == y {
                         self.selected = Some(*id);
-                    } else {
-                        self.selected = None;
                     }
                 }
             } else if handle.left_mouse_released() && self.selected.is_some() {
