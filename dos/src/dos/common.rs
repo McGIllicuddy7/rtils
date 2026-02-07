@@ -2,8 +2,8 @@ pub use raylib::prelude::*;
 pub use serde::{Deserialize, Serialize};
 pub use std::sync::Arc;
 use std::{f32, f64};
-pub const SCREEN_WIDTH: i32 = 1200;
-pub const SCREEN_HEIGHT: i32 = 900;
+pub const SCREEN_WIDTH: i32 = 1000;
+pub const SCREEN_HEIGHT: i32 = 750;
 pub const DEFAULT_THUMBNAIL_SIZE: i32 = 80;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -275,9 +275,9 @@ impl Pallete {
         colors[i] = BColor::from_rl_color(Color::CYAN); //15
         i += 1;
         colors[i] = BColor::from_rl_color(Color::DARKCYAN); //16
-        let out = Self { colors };
+        
         //   println!("{:#?}", out);
-        out
+        Self { colors }
     }
     pub fn as_rl(&self) -> [Color; 256] {
         let mut out = [Color::BLACK; 256];

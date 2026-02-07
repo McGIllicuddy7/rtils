@@ -342,6 +342,7 @@ impl DosRt {
             }
         }
         drop(draw);
+        to_load.dedup();
         for i in to_load {
             let Ok(x) = handle.load_texture(_thread, &i) else {
                 continue;

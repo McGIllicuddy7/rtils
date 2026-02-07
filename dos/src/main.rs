@@ -1,38 +1,21 @@
-use dos::{SysHandle, setup};
-
+use dos::{SysHandle, setup, tilemap::FOREGROUND_LAYER, tilemap::TileMap};
 fn main() {
     setup(main_func);
 }
 
 pub fn main_func(mut handle: SysHandle) {
-    let strings: Vec<String> = (0..30).map(|i| format!("hello :{i}")).collect();
-    let mut df = 0.0;
+    let draw_table = vec![];
+    let mut map = TileMap::new(50, 50, "bg.png".to_string(), draw_table);
+    let sprite_img = map.load_image("image.png");
+    let _sprite = map.create_sprite(10, 10, 1, 1, sprite_img, FOREGROUND_LAYER);
     while !handle.should_exit() {
         handle.begin_drawing();
-        handle.begin_div(200, 380);
-        let (f, hit) = handle.draw_button_image_scroll_box_exp(
-            2,
-            2,
-            200,
-            200,
-            20,
-            df,
-            false,
-            &strings,
-            |x| x.to_string(),
-            |_| "image.png".into(),
-        );
-        df = f;
-        if let Some(h) = hit {
-            println!("h:{h}");
-        }
+        handle.begin_div(800, 600);
+        let (clicked, selected) = map.draw(300, 50, 500, 500, &mut handle, false);
         handle.end_div();
-        handle.begin_div(200, 380);
-        let x = handle.text_user_input_saved_exp("text", 2, 2, 200, 50, 20);
-        if let Some(msg) = x {
-            println!("{msg}");
+        if clicked.is_some() || selected.is_some() {
+            println!("{:#?}, {:#?}", clicked, selected);
         }
-        handle.end_div();
         handle.end_drawing();
     }
 }
