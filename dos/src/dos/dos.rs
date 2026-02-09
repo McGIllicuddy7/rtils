@@ -251,6 +251,11 @@ impl DosRt {
                     );
                 }
             }
+            DrawCall::DrawPixels { points } => {
+                for (pos, col) in points {
+                    draw.draw_pixel(pos.x, pos.y, col.as_rl_color());
+                }
+            }
             DrawCall::DrawText {
                 x,
                 y,

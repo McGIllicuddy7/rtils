@@ -74,6 +74,9 @@ pub enum DrawCall {
         points: Vec<(Pos2, BColor)>,
         width: f32,
     },
+    DrawPixels {
+        points: Vec<(Pos2, BColor)>,
+    },
     DrawText {
         x: i32,
         y: i32,

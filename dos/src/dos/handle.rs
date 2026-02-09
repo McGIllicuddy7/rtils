@@ -1128,15 +1128,6 @@ impl SysHandle {
         self.user_input.pressed_keys.contains(&ch)
     }
 
-    pub fn is_key_pressed(&self, ch: char) -> bool {
-        self.user_input
-            .pressed_keys
-            .iter()
-            .map(|i| i.to_ascii_lowercase())
-            .find(|i| *i == ch.to_ascii_lowercase())
-            .is_some()
-    }
-
     pub fn left_mouse_down(&self) -> bool {
         self.user_input.left_mouse_down()
     }
@@ -1178,6 +1169,34 @@ impl SysHandle {
             x: self.user_input.mouse_x(),
             y: self.user_input.mouse_y(),
         }
+    }
+
+    pub fn scroll_amount(&self) -> f32 {
+        self.user_input.scroll_amount()
+    }
+
+    pub fn is_key_down(&self, key: KeyboardKey) -> bool {
+        self.user_input.is_key_down(key)
+    }
+
+    pub fn is_key_pressed(&self, key: KeyboardKey) -> bool {
+        self.user_input.is_key_pressed(key)
+    }
+
+    pub fn is_key_released(&self, key: KeyboardKey) -> bool {
+        self.user_input.is_key_released(key)
+    }
+
+    pub fn is_mouse_button_down(&self, key: MouseButton) -> bool {
+        self.user_input.is_mouse_button_down(key)
+    }
+
+    pub fn is_mouse_button_pressed(&self, key: MouseButton) -> bool {
+        self.user_input.is_mouse_button_pressed(key)
+    }
+
+    pub fn is_mouse_button_released(&self, key: MouseButton) -> bool {
+        self.user_input.is_mouse_button_released(key)
     }
 
     pub fn draw_button_image_exp(
