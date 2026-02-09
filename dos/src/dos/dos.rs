@@ -1,6 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{SysHandle, input::Input, rtils::rtils_useful::BPipe};
+use crate::{
+    SysHandle,
+    input::Input,
+    rtils::rtils_useful::BPipe,
+    scene::{Scene, SceneRenderer},
+};
 
 use super::common::*;
 pub struct Dos {
@@ -9,6 +14,7 @@ pub struct Dos {
     pub canvas: Option<RenderTexture2D>,
     pub loaded_textures: HashMap<String, Texture2D>,
     pub shader: Option<Shader>,
+    pub scene_renderer: SceneRenderer,
     pub w: i32,
     pub h: i32,
     pub scan_line: i32,
@@ -68,6 +74,7 @@ impl Dos {
             render_texture: None,
             canvas: None,
             loaded_textures: HashMap::new(),
+            scene_renderer: SceneRenderer::new(),
             w: SCREEN_WIDTH,
             h: SCREEN_HEIGHT,
 
@@ -215,6 +222,8 @@ impl DosRt {
         draw: &mut RaylibTextureMode<'_, T>,
         it: &mut dyn Iterator<Item = DrawCall>,
         to_load: &mut Vec<String>,
+        renderer: &mut SceneRenderer,
+        thread: &RaylibThread,
     ) -> Option<()> {
         let i = it.next()?;
         match i {
@@ -314,13 +323,23 @@ impl DosRt {
             DrawCall::Scissor { x, y, h, w } => {
                 let mut sz = draw.begin_scissor_mode(x, y, w, h);
                 loop {
-                    if Self::run_draw_call(map, &mut sz, it, to_load).is_none() {
+                    if Self::run_draw_call(map, &mut sz, it, to_load, renderer, thread).is_none() {
                         break;
                     }
                 }
             }
             DrawCall::EndScissor => {
                 return None;
+            }
+            DrawCall::DrawScene {
+                start_x,
+                start_y,
+                width,
+                height,
+                scene,
+            } => {
+                //    let mut mode = draw.begin_scissor_mode(start_x, start_y, width, height);
+                renderer.render(&scene, draw, thread);
             }
             _ => {}
         }
@@ -346,6 +365,8 @@ impl DosRt {
                 &mut draw,
                 &mut drain,
                 &mut to_load,
+                &mut self.dos.scene_renderer,
+                _thread,
             )
             .is_none()
             {
@@ -364,6 +385,46 @@ impl DosRt {
             };
             self.dos.loaded_textures.insert(i, x);
         }
+        if self.dos.scene_renderer.to_load.len() != 0 {
+            self.dos.scene_renderer.shader = Some(handle.load_shader(
+                _thread,
+                Some("shaders/shadow_map_vert.glsl"),
+                Some("shaders/shadow_map_frag.glsl"),
+            ));
+            self.dos.scene_renderer.to_load.remove("box");
+            let msh = unsafe {
+                let msh = handle
+                    .load_model_from_mesh(
+                        _thread,
+                        raylib::models::Mesh::gen_mesh_cube(_thread, 1.0, 1.0, 1.0).make_weak(),
+                    )
+                    .unwrap();
+                //   (*msh.materials).shader = *self.dos.scene_renderer.shader.as_deref().unwrap();
+                println!("{:#?}", msh.get_model_bounding_box());
+                msh
+            };
+            self.dos
+                .scene_renderer
+                .loaded_meshes
+                .insert("box".into(), msh);
+        }
+        for i in &self.dos.scene_renderer.to_load {
+            let name = "models/".to_string() + &i;
+            let Ok(modl) = handle.load_model(_thread, &name) else {
+                continue;
+            };
+            for i in 0..modl.materialCount {
+                unsafe {
+                    (*modl.materials.add(i as usize)).shader =
+                        *self.dos.scene_renderer.shader.as_deref().unwrap();
+                }
+            }
+            self.dos
+                .scene_renderer
+                .loaded_meshes
+                .insert(i.clone(), modl);
+        }
+        self.dos.scene_renderer.to_load.clear();
     }
 }
 
@@ -391,8 +452,8 @@ pub fn setup(fn_main: impl FnOnce(super::SysHandle) + Send + 'static) {
         dos: Dos {
             shader: Some(handle.load_shader(
                 &thread,
-                Some("./src/vert.glsl"),
-                Some("./src/retro.glsl"),
+                Some("./shaders/vert.glsl"),
+                Some("./shaders/retro.glsl"),
             )),
             loaded_textures: HashMap::new(),
             pallete: Pallete::basic(),
@@ -401,6 +462,7 @@ pub fn setup(fn_main: impl FnOnce(super::SysHandle) + Send + 'static) {
             h,
             w,
             scan_line: 0,
+            scene_renderer: SceneRenderer::new(),
         },
         cmd_pipeline: cmd1,
         frame: Vec::new(),

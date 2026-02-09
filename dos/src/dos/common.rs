@@ -3,7 +3,7 @@ pub use serde::{Deserialize, Serialize};
 use std::f32;
 pub use std::sync::Arc;
 
-use crate::input::Input;
+use crate::{input::Input, scene::Scene};
 pub const SCREEN_WIDTH: i32 = 1200;
 pub const SCREEN_HEIGHT: i32 = 900;
 pub const DEFAULT_THUMBNAIL_SIZE: i32 = 80;
@@ -116,6 +116,13 @@ pub enum DrawCall {
     },
     UnloadedImage {
         name: String,
+    },
+    DrawScene {
+        start_x: i32,
+        start_y: i32,
+        width: i32,
+        height: i32,
+        scene: Scene,
     },
     EndScissor,
     Exiting,
