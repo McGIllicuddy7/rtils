@@ -462,11 +462,11 @@ impl SysHandle {
         let (mut h, texts) = self.text_get_height_and_lines(text, text_height, w - 5);
         h += 10;
         let pos = self.get_absolute_pos(Pos2 { x, y });
-        let did_hit = self.user_input.mouse_x >= pos.x
-            && self.user_input.mouse_y >= pos.y
-            && self.user_input.mouse_x < pos.x + w
-            && self.user_input.mouse_y < pos.y + h;
-        let col = if did_hit && self.user_input.left_mouse_down {
+        let did_hit = self.user_input.mouse_x() >= pos.x
+            && self.user_input.mouse_y() >= pos.y
+            && self.user_input.mouse_x() < pos.x + w
+            && self.user_input.mouse_y() < pos.y + h;
+        let col = if did_hit && self.user_input.left_mouse_down() {
             self.theme.object_pressed_color
         } else {
             self.theme.object_color
@@ -500,11 +500,11 @@ impl SysHandle {
             h,
         });
 
-        self.user_input.mouse_x >= pos.x
-            && self.user_input.mouse_y >= pos.y
-            && self.user_input.mouse_x < pos.x + w
-            && self.user_input.mouse_y < pos.y + h
-            && self.user_input.left_mouse_released
+        self.user_input.mouse_x() >= pos.x
+            && self.user_input.mouse_y() >= pos.y
+            && self.user_input.mouse_x() < pos.x + w
+            && self.user_input.mouse_y() < pos.y + h
+            && self.user_input.left_mouse_released()
     }
 
     pub fn draw_button(&mut self, w: i32, text_height: i32, text: &str) -> bool {
@@ -723,10 +723,10 @@ impl SysHandle {
         });
 
         self.queue.push(DrawCall::EndScissor);
-        let hovered = self.user_input.mouse_x >= base.x
-            && self.user_input.mouse_y >= base.y
-            && self.user_input.mouse_x < base.x + w
-            && self.user_input.mouse_y < base.y + h;
+        let hovered = self.user_input.mouse_x() >= base.x
+            && self.user_input.mouse_y() >= base.y
+            && self.user_input.mouse_x() < base.x + w
+            && self.user_input.mouse_y() < base.y + h;
         let mut out = amount;
         let bx = Rect {
             x: bx.x - 5,
@@ -734,15 +734,15 @@ impl SysHandle {
             w: bx.w + 10,
             h: bx.h + 10,
         };
-        if self.user_input.left_mouse_down
+        if self.user_input.left_mouse_down()
             && bx.check_collision(Pos2 {
-                x: self.user_input.mouse_x,
-                y: self.user_input.mouse_y,
+                x: self.user_input.mouse_x(),
+                y: self.user_input.mouse_y(),
             })
         {
-            out += self.user_input.mouse_dy / h as f32 * 1.5;
+            out += self.user_input.mouse_dy() / h as f32 * 1.5;
         } else if hovered {
-            out -= self.user_input.scroll_amount as f32 / h as f32;
+            out -= self.user_input.scroll_amount() as f32 / h as f32;
         }
 
         self.update_cursor(Rect {
@@ -806,11 +806,11 @@ impl SysHandle {
                 y: y as i32,
             };
             if !(y as i32 + i.0 < base.y || (y as i32) > base.y + h) {
-                let did_hit = self.user_input.mouse_x >= pos.x
-                    && self.user_input.mouse_y >= pos.y
-                    && self.user_input.mouse_x < pos.x + w
-                    && self.user_input.mouse_y < pos.y + i.0;
-                let col = if did_hit && self.user_input.left_mouse_down {
+                let did_hit = self.user_input.mouse_x() >= pos.x
+                    && self.user_input.mouse_y() >= pos.y
+                    && self.user_input.mouse_x() < pos.x + w
+                    && self.user_input.mouse_y() < pos.y + i.0;
+                let col = if did_hit && self.user_input.left_mouse_down() {
                     self.theme.object_pressed_color
                 } else {
                     self.theme.object_color
@@ -838,7 +838,7 @@ impl SysHandle {
                     current.y += text_height;
                 }
 
-                if did_hit && self.user_input.left_mouse_released {
+                if did_hit && self.user_input.left_mouse_released() {
                     hit = Some(idx);
                 }
             }
@@ -881,10 +881,10 @@ impl SysHandle {
             width: 1.0,
         });
         self.queue.push(DrawCall::EndScissor);
-        let hovered = self.user_input.mouse_x >= base.x
-            && self.user_input.mouse_y >= base.y
-            && self.user_input.mouse_x < base.x + w
-            && self.user_input.mouse_y < base.y + h;
+        let hovered = self.user_input.mouse_x() >= base.x
+            && self.user_input.mouse_y() >= base.y
+            && self.user_input.mouse_x() < base.x + w
+            && self.user_input.mouse_y() < base.y + h;
         let mut out = amount;
         let bx = Rect {
             x: bx.x - 5,
@@ -892,15 +892,15 @@ impl SysHandle {
             w: bx.w + 10,
             h: bx.h + 10,
         };
-        if self.user_input.left_mouse_down
+        if self.user_input.left_mouse_down()
             && bx.check_collision(Pos2 {
-                x: self.user_input.mouse_x,
-                y: self.user_input.mouse_y,
+                x: self.user_input.mouse_x(),
+                y: self.user_input.mouse_y(),
             })
         {
-            out += self.user_input.mouse_dy / h as f32 * 1.5;
+            out += self.user_input.mouse_dy() / h as f32 * 1.5;
         } else if hovered {
-            out -= self.user_input.scroll_amount as f32 / h as f32;
+            out -= self.user_input.scroll_amount() as f32 / h as f32;
         }
         self.update_cursor(Rect {
             x: base.x,
@@ -997,10 +997,10 @@ impl SysHandle {
         let mut out_cursor = inp.cursor;
         let selected_section = None;
         let mut returned = None;
-        if self.user_input.left_mouse_released {
+        if self.user_input.left_mouse_released() {
             out_selected = bx.check_collision(Pos2 {
-                x: self.user_input.mouse_x,
-                y: self.user_input.mouse_y,
+                x: self.user_input.mouse_x(),
+                y: self.user_input.mouse_y(),
             });
         }
         if out_selected {
@@ -1025,10 +1025,10 @@ impl SysHandle {
                     out_cursor += 1;
                 }
             }
-            if self.user_input.left_arrow_pressed {
+            if self.user_input.left_arrow_pressed() {
                 out_cursor = out_cursor.saturating_sub(1);
             }
-            if self.user_input.right_arrow_pressed && out_cursor <= output.len() {
+            if self.user_input.right_arrow_pressed() && out_cursor <= output.len() {
                 out_cursor += 1;
             }
             out_cursor = out_cursor.clamp(0, output.len() + 1);
@@ -1058,9 +1058,9 @@ impl SysHandle {
             cursor.y -= th - h;
         }
         cursor.x += 2;
-        if self.user_input.left_mouse_pressed {
-            let x = self.user_input.mouse_x;
-            let y = self.user_input.mouse_y;
+        if self.user_input.left_mouse_pressed() {
+            let x = self.user_input.mouse_x();
+            let y = self.user_input.mouse_y();
             let o2 = output.clone() + " ";
             let id = self.nearest_char_to(x, y, cursor.x, cursor.y, &o2, text_height, w - 2);
             out_cursor = id;
@@ -1138,27 +1138,27 @@ impl SysHandle {
     }
 
     pub fn left_mouse_down(&self) -> bool {
-        self.user_input.left_mouse_down
+        self.user_input.left_mouse_down()
     }
 
     pub fn left_mouse_pressed(&self) -> bool {
-        self.user_input.left_mouse_pressed
+        self.user_input.left_mouse_pressed()
     }
 
     pub fn left_mouse_released(&self) -> bool {
-        self.user_input.left_mouse_released
+        self.user_input.left_mouse_released()
     }
 
     pub fn right_mouse_down(&self) -> bool {
-        self.user_input.right_mouse_down
+        self.user_input.right_mouse_down()
     }
 
     pub fn right_mouse_pressed(&self) -> bool {
-        self.user_input.right_arrow_pressed
+        self.user_input.right_arrow_pressed()
     }
 
     pub fn right_mouse_released(&self) -> bool {
-        self.user_input.right_mouse_released
+        self.user_input.right_mouse_released()
     }
 
     pub fn get_pressed_chars(&self) -> &[char] {
@@ -1166,17 +1166,17 @@ impl SysHandle {
     }
 
     pub fn get_mouse_x(&self) -> i32 {
-        self.user_input.mouse_x
+        self.user_input.mouse_x()
     }
 
     pub fn get_mouse_y(&self) -> i32 {
-        self.user_input.mouse_y
+        self.user_input.mouse_y()
     }
 
     pub fn get_mouse_pos(&self) -> Pos2 {
         Pos2 {
-            x: self.user_input.mouse_x,
-            y: self.user_input.mouse_y,
+            x: self.user_input.mouse_x(),
+            y: self.user_input.mouse_y(),
         }
     }
 
@@ -1195,11 +1195,11 @@ impl SysHandle {
             h = self.get_thumbnail_size();
         }
         let pos = self.get_absolute_pos(Pos2 { x, y });
-        let did_hit = self.user_input.mouse_x >= pos.x
-            && self.user_input.mouse_y >= pos.y
-            && self.user_input.mouse_x < pos.x + w
-            && self.user_input.mouse_y < pos.y + h;
-        let col = if did_hit && self.user_input.left_mouse_down {
+        let did_hit = self.user_input.mouse_x() >= pos.x
+            && self.user_input.mouse_y() >= pos.y
+            && self.user_input.mouse_x() < pos.x + w
+            && self.user_input.mouse_y() < pos.y + h;
+        let col = if did_hit && self.user_input.left_mouse_down() {
             self.theme.object_pressed_color
         } else {
             self.theme.object_color
@@ -1241,11 +1241,11 @@ impl SysHandle {
             h,
         });
 
-        self.user_input.mouse_x >= pos.x
-            && self.user_input.mouse_y >= pos.y
-            && self.user_input.mouse_x < pos.x + w
-            && self.user_input.mouse_y < pos.y + h
-            && self.user_input.left_mouse_released
+        self.user_input.mouse_x() >= pos.x
+            && self.user_input.mouse_y() >= pos.y
+            && self.user_input.mouse_x() < pos.x + w
+            && self.user_input.mouse_y() < pos.y + h
+            && self.user_input.left_mouse_released()
     }
 
     pub fn draw_button_image(&mut self, w: i32, text_height: i32, text: &str, image: &str) -> bool {
@@ -1312,11 +1312,11 @@ impl SysHandle {
                 y: y as i32,
             };
             if !(y as i32 + i.0 < base.y || (y as i32) > base.y + h) {
-                let did_hit = self.user_input.mouse_x >= pos.x
-                    && self.user_input.mouse_y >= pos.y
-                    && self.user_input.mouse_x < pos.x + w
-                    && self.user_input.mouse_y < pos.y + i.0;
-                let col = if did_hit && self.user_input.left_mouse_down {
+                let did_hit = self.user_input.mouse_x() >= pos.x
+                    && self.user_input.mouse_y() >= pos.y
+                    && self.user_input.mouse_x() < pos.x + w
+                    && self.user_input.mouse_y() < pos.y + i.0;
+                let col = if did_hit && self.user_input.left_mouse_down() {
                     self.theme.object_pressed_color
                 } else {
                     self.theme.object_color
@@ -1351,7 +1351,7 @@ impl SysHandle {
                     current.y += text_height;
                 }
 
-                if did_hit && self.user_input.left_mouse_released {
+                if did_hit && self.user_input.left_mouse_released() {
                     hit = Some(idx);
                 }
             }
@@ -1394,10 +1394,10 @@ impl SysHandle {
             width: 1.0,
         });
         self.queue.push(DrawCall::EndScissor);
-        let hovered = self.user_input.mouse_x >= base.x
-            && self.user_input.mouse_y >= base.y
-            && self.user_input.mouse_x < base.x + w
-            && self.user_input.mouse_y < base.y + h;
+        let hovered = self.user_input.mouse_x() >= base.x
+            && self.user_input.mouse_y() >= base.y
+            && self.user_input.mouse_x() < base.x + w
+            && self.user_input.mouse_y() < base.y + h;
         let mut out = amount;
         let bx = Rect {
             x: bx.x - 5,
@@ -1405,15 +1405,15 @@ impl SysHandle {
             w: bx.w + 10,
             h: bx.h + 10,
         };
-        if self.user_input.left_mouse_down
+        if self.user_input.left_mouse_down()
             && bx.check_collision(Pos2 {
-                x: self.user_input.mouse_x,
-                y: self.user_input.mouse_y,
+                x: self.user_input.mouse_x(),
+                y: self.user_input.mouse_y(),
             })
         {
-            out += self.user_input.mouse_dy / h as f32 * 1.5;
+            out += self.user_input.mouse_dy() / h as f32 * 1.5;
         } else if hovered {
-            out -= self.user_input.scroll_amount as f32 / h as f32;
+            out -= self.user_input.scroll_amount() as f32 / h as f32;
         }
         self.update_cursor(Rect {
             x: base.x,

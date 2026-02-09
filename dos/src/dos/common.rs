@@ -1,10 +1,9 @@
 pub use raylib::prelude::*;
 pub use serde::{Deserialize, Serialize};
+use std::f32;
 pub use std::sync::Arc;
-use std::{
-    f32,
-    f64::{self, consts::TAU},
-};
+
+use crate::input::Input;
 pub const SCREEN_WIDTH: i32 = 1200;
 pub const SCREEN_HEIGHT: i32 = 900;
 pub const DEFAULT_THUMBNAIL_SIZE: i32 = 80;
@@ -140,19 +139,7 @@ pub struct Div {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct UserInput {
     pub pressed_keys: Vec<char>,
-    pub mouse_x: i32,
-    pub mouse_y: i32,
-    pub mouse_dx: f32,
-    pub mouse_dy: f32,
-    pub scroll_amount: i32,
-    pub left_mouse_down: bool,
-    pub right_mouse_down: bool,
-    pub left_mouse_pressed: bool,
-    pub right_mouse_pressed: bool,
-    pub left_mouse_released: bool,
-    pub right_mouse_released: bool,
-    pub left_arrow_pressed: bool,
-    pub right_arrow_pressed: bool,
+    pub input: Input,
 }
 impl Default for UserInput {
     fn default() -> Self {
@@ -164,31 +151,62 @@ impl UserInput {
     pub fn new() -> Self {
         UserInput {
             pressed_keys: Vec::new(),
-            mouse_x: 0,
-            mouse_y: 0,
-            mouse_dx: 0.,
-            mouse_dy: 0.,
-            left_mouse_down: false,
-            right_mouse_down: false,
-            left_mouse_pressed: false,
-            right_mouse_pressed: false,
-            left_mouse_released: false,
-            right_mouse_released: false,
-            right_arrow_pressed: false,
-            left_arrow_pressed: false,
-            scroll_amount: 0,
+            input: Input::new(),
         }
     }
     pub fn reset(&mut self) {
         self.pressed_keys.clear();
-        self.left_mouse_pressed = false;
-        self.left_mouse_released = false;
-        self.right_mouse_released = false;
-        self.right_mouse_pressed = false;
-        self.right_arrow_pressed = false;
-        self.left_arrow_pressed = false;
-        self.mouse_dx = 0.;
-        self.mouse_dy = 0.;
+    }
+    pub fn mouse_x(&self) -> i32 {
+        self.input.mouse_x
+    }
+    pub fn mouse_y(&self) -> i32 {
+        self.input.mouse_y
+    }
+    pub fn mouse_dx(&self) -> f32 {
+        self.input.mouse_dx
+    }
+    pub fn mouse_dy(&self) -> f32 {
+        self.input.mouse_dy
+    }
+    pub fn left_mouse_down(&self) -> bool {
+        self.input.codes[&(MouseButton::MOUSE_BUTTON_LEFT as i32)].down
+    }
+    pub fn left_mouse_pressed(&self) -> bool {
+        self.input.mouse[&(MouseButton::MOUSE_BUTTON_LEFT as i32)].pressed
+    }
+    pub fn left_mouse_released(&self) -> bool {
+        self.input.mouse[&(MouseButton::MOUSE_BUTTON_LEFT as i32)].released
+    }
+    pub fn right_mouse_down(&self) -> bool {
+        self.input.mouse[&(MouseButton::MOUSE_BUTTON_RIGHT as i32)].down
+    }
+    pub fn right_mouse_pressed(&self) -> bool {
+        self.input.mouse[&(MouseButton::MOUSE_BUTTON_RIGHT as i32)].pressed
+    }
+    pub fn right_mouse_released(&self) -> bool {
+        self.input.mouse[&(MouseButton::MOUSE_BUTTON_RIGHT as i32)].released
+    }
+    pub fn scroll_amount(&self) -> f32 {
+        self.input.scroll_amount
+    }
+    pub fn left_arrow_pressed(&self) -> bool {
+        self.input.codes[&(KeyboardKey::KEY_LEFT as i32)].pressed
+    }
+    pub fn right_arrow_pressed(&self) -> bool {
+        self.input.codes[&(KeyboardKey::KEY_RIGHT as i32)].pressed
+    }
+    pub fn left_arrow_down(&self) -> bool {
+        self.input.codes[&(KeyboardKey::KEY_LEFT as i32)].down
+    }
+    pub fn right_arrow_down(&self) -> bool {
+        self.input.codes[&(KeyboardKey::KEY_RIGHT as i32)].down
+    }
+    pub fn left_arrow_released(&self) -> bool {
+        self.input.codes[&(KeyboardKey::KEY_LEFT as i32)].released
+    }
+    pub fn right_arrow_released(&self) -> bool {
+        self.input.codes[&(KeyboardKey::KEY_RIGHT as i32)].released
     }
 }
 
@@ -214,7 +232,7 @@ impl Pallete {
         };
         let mut thetas = [0.0; 15];
         for i in 0..15 {
-            thetas[i] = (theta as f64 + i as f64 * 360.0 / 16.0);
+            thetas[i] = theta as f64 + i as f64 * 360.0 / 16.0;
         }
         let mut colors = [BColor {
             r: 0,

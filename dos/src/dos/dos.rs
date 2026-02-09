@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{SysHandle, rtils::rtils_useful::BPipe};
+use crate::{SysHandle, input::Input, rtils::rtils_useful::BPipe};
 
 use super::common::*;
 pub struct Dos {
@@ -192,32 +192,13 @@ impl DosRt {
             self.cmd_pipeline.send(DrawCall::Exiting).unwrap();
             return;
         }
-        self.input.left_mouse_down = handle.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
-        self.input.right_mouse_down = handle.is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT);
-        self.input.left_mouse_pressed =
-            handle.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
-        self.input.left_mouse_released =
-            handle.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT);
-        self.input.right_mouse_pressed =
-            handle.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT);
-
-        self.input.right_mouse_released =
-            handle.is_mouse_button_released(MouseButton::MOUSE_BUTTON_RIGHT);
         if handle.is_key_pressed(KeyboardKey::KEY_BACKSPACE) {
             self.input.pressed_keys.push(127 as char);
         }
         if handle.is_key_pressed(KeyboardKey::KEY_ENTER) {
             self.input.pressed_keys.push('\n');
         }
-        self.input.left_arrow_pressed = handle.is_key_pressed(KeyboardKey::KEY_LEFT);
-        self.input.right_arrow_pressed = handle.is_key_pressed(KeyboardKey::KEY_RIGHT);
-        let rat = self.dos.w as f32 / (SCREEN_WIDTH as f32);
-        self.input.mouse_x = (handle.get_mouse_x() as f32 / rat) as i32;
-        self.input.mouse_y = (handle.get_mouse_y() as f32 / rat) as i32;
-        let delt = handle.get_mouse_delta();
-        self.input.mouse_dx = delt.x / rat;
-        self.input.mouse_dy = delt.y / rat;
-        self.input.scroll_amount = handle.get_mouse_wheel_move() as i32;
+        self.input.input = super::input::generate_input(handle);
         self.cmd_pipeline
             .send(DrawCall::Update {
                 input: self.input.clone(),
@@ -385,19 +366,7 @@ pub fn setup(fn_main: impl FnOnce(super::SysHandle) + Send + 'static) {
     let (cmd1, cmd2) = BPipe::create();
     let inp = UserInput {
         pressed_keys: Vec::new(),
-        mouse_dx: 0.,
-        mouse_dy: 0.,
-        mouse_x: 0,
-        mouse_y: 0,
-        scroll_amount: 0,
-        left_mouse_down: false,
-        right_mouse_down: false,
-        left_mouse_pressed: false,
-        right_mouse_pressed: false,
-        left_mouse_released: false,
-        right_mouse_released: false,
-        left_arrow_pressed: false,
-        right_arrow_pressed: false,
+        input: Input::new(),
     };
 
     let (mut handle, thread) = raylib::init().title("bridget").build();
