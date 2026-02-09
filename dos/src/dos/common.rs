@@ -208,6 +208,24 @@ impl UserInput {
     pub fn right_arrow_released(&self) -> bool {
         self.input.codes[&(KeyboardKey::KEY_RIGHT as i32)].released
     }
+    pub fn is_key_down(&self, key: KeyboardKey) -> bool {
+        self.input.codes[&(key as i32)].down
+    }
+    pub fn is_key_pressed(&self, key: KeyboardKey) -> bool {
+        self.input.codes[&(key as i32)].pressed
+    }
+    pub fn is_key_released(&self, key: KeyboardKey) -> bool {
+        self.input.codes[&(key as i32)].released
+    }
+    pub fn is_mouse_button_down(&self, key: MouseButton) -> bool {
+        self.input.mouse[&(key as i32)].down
+    }
+    pub fn is_mouse_button_pressed(&self, key: MouseButton) -> bool {
+        self.input.mouse[&(key as i32)].pressed
+    }
+    pub fn is_mouse_button_released(&self, key: MouseButton) -> bool {
+        self.input.mouse[&(key as i32)].released
+    }
 }
 
 #[derive(Debug, Clone)]
