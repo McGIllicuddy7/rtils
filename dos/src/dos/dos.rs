@@ -4,13 +4,14 @@ use crate::{
     SysHandle,
     input::Input,
     rtils::rtils_useful::BPipe,
-    scene::{Scene, SceneRenderer},
+    scene::{self, Scene, SceneRenderer},
 };
 
 use super::common::*;
 pub struct Dos {
     pub pallete: Pallete,
     pub render_texture: Option<RenderTexture2D>,
+    pub scene_textures: Vec<RenderTexture2D>,
     pub canvas: Option<RenderTexture2D>,
     pub loaded_textures: HashMap<String, Texture2D>,
     pub shader: Option<Shader>,
@@ -75,6 +76,7 @@ impl Dos {
             canvas: None,
             loaded_textures: HashMap::new(),
             scene_renderer: SceneRenderer::new(),
+            scene_textures: Vec::new(),
             w: SCREEN_WIDTH,
             h: SCREEN_HEIGHT,
 
@@ -125,6 +127,7 @@ impl DosRt {
     pub fn update_cmds(&mut self, handle: &mut RaylibHandle, thread: &RaylibThread) {
         while let Ok(Some(next)) = self.cmd_pipeline.recieve() {
             if self.recieving_frame {
+                let old = next.clone();
                 match next {
                     DrawCall::EndDrawing => {
                         self.should_draw = true;
@@ -135,6 +138,27 @@ impl DosRt {
                         self.should_exit = true;
                         self.recieving_frame = false;
                         break;
+                    }
+
+                    DrawCall::DrawScene {
+                        start_x: _,
+                        start_y: _,
+                        width: _,
+                        height: _,
+                        scene,
+                    } => {
+                        if self.dos.scene_textures.is_empty() {
+                            self.dos
+                                .scene_textures
+                                .push(handle.load_render_texture(thread, 1200, 900).unwrap());
+                        }
+                        self.dos.scene_renderer.render(
+                            &scene,
+                            handle,
+                            thread,
+                            &mut self.dos.scene_textures[0],
+                        );
+                        self.frame.push(old);
                     }
                     _ => {
                         self.frame.push(next);
@@ -155,6 +179,26 @@ impl DosRt {
                     }
                     DrawCall::UnloadedImage { name } => {
                         self.dos.loaded_textures.remove(&name);
+                    }
+                    DrawCall::DrawScene {
+                        start_x: _,
+                        start_y: _,
+                        width: _,
+                        height: _,
+                        scene,
+                    } => {
+                        if self.dos.scene_textures.is_empty() {
+                            self.dos
+                                .scene_textures
+                                .push(handle.load_render_texture(thread, 1200, 900).unwrap());
+                        }
+                        self.dos.scene_renderer.render(
+                            &scene,
+                            handle,
+                            thread,
+                            &mut self.dos.scene_textures[0],
+                        );
+                        self.dos.scene_renderer.should_draw = true;
                     }
                     _ => continue,
                 }
@@ -183,6 +227,7 @@ impl DosRt {
                 }
                 self.render(&mut handle, &thread);
             }
+            self.dos.scene_renderer.should_draw = false;
         }
         self.dos.render_texture = None;
         self.dos.shader = None;
@@ -222,13 +267,22 @@ impl DosRt {
         draw: &mut RaylibTextureMode<'_, T>,
         it: &mut dyn Iterator<Item = DrawCall>,
         to_load: &mut Vec<String>,
-        renderer: &mut SceneRenderer,
         thread: &RaylibThread,
+        scene_textures: &[RenderTexture2D],
     ) -> Option<()> {
         let i = it.next()?;
         match i {
             DrawCall::ClearBackground { color } => {
                 draw.clear_background(color.as_rl_color());
+            }
+            DrawCall::DrawScene {
+                start_x: _,
+                start_y: _,
+                width: _,
+                height: _,
+                scene: _,
+            } => {
+                draw.draw_texture(&scene_textures[0], 0, 0, Color::WHITE);
             }
             DrawCall::Rectangle {
                 x,
@@ -323,23 +377,15 @@ impl DosRt {
             DrawCall::Scissor { x, y, h, w } => {
                 let mut sz = draw.begin_scissor_mode(x, y, w, h);
                 loop {
-                    if Self::run_draw_call(map, &mut sz, it, to_load, renderer, thread).is_none() {
+                    if Self::run_draw_call(map, &mut sz, it, to_load, thread, scene_textures)
+                        .is_none()
+                    {
                         break;
                     }
                 }
             }
             DrawCall::EndScissor => {
                 return None;
-            }
-            DrawCall::DrawScene {
-                start_x,
-                start_y,
-                width,
-                height,
-                scene,
-            } => {
-                //    let mut mode = draw.begin_scissor_mode(start_x, start_y, width, height);
-                renderer.render(&scene, draw, thread);
             }
             _ => {}
         }
@@ -357,6 +403,7 @@ impl DosRt {
         self.input.pressed_keys.clear();
         let mut draw =
             handle.begin_texture_mode(_thread, self.dos.render_texture.as_mut().unwrap());
+        if self.dos.scene_renderer.should_draw {}
         let mut to_load = Vec::new();
         let mut drain = self.frame.drain(0..self.frame.len());
         loop {
@@ -365,8 +412,8 @@ impl DosRt {
                 &mut draw,
                 &mut drain,
                 &mut to_load,
-                &mut self.dos.scene_renderer,
                 _thread,
+                &self.dos.scene_textures,
             )
             .is_none()
             {
@@ -385,46 +432,6 @@ impl DosRt {
             };
             self.dos.loaded_textures.insert(i, x);
         }
-        if self.dos.scene_renderer.to_load.len() != 0 {
-            self.dos.scene_renderer.shader = Some(handle.load_shader(
-                _thread,
-                Some("shaders/shadow_map_vert.glsl"),
-                Some("shaders/shadow_map_frag.glsl"),
-            ));
-            self.dos.scene_renderer.to_load.remove("box");
-            let msh = unsafe {
-                let msh = handle
-                    .load_model_from_mesh(
-                        _thread,
-                        raylib::models::Mesh::gen_mesh_cube(_thread, 1.0, 1.0, 1.0).make_weak(),
-                    )
-                    .unwrap();
-                //   (*msh.materials).shader = *self.dos.scene_renderer.shader.as_deref().unwrap();
-                println!("{:#?}", msh.get_model_bounding_box());
-                msh
-            };
-            self.dos
-                .scene_renderer
-                .loaded_meshes
-                .insert("box".into(), msh);
-        }
-        for i in &self.dos.scene_renderer.to_load {
-            let name = "models/".to_string() + &i;
-            let Ok(modl) = handle.load_model(_thread, &name) else {
-                continue;
-            };
-            for i in 0..modl.materialCount {
-                unsafe {
-                    (*modl.materials.add(i as usize)).shader =
-                        *self.dos.scene_renderer.shader.as_deref().unwrap();
-                }
-            }
-            self.dos
-                .scene_renderer
-                .loaded_meshes
-                .insert(i.clone(), modl);
-        }
-        self.dos.scene_renderer.to_load.clear();
     }
 }
 
@@ -455,6 +462,7 @@ pub fn setup(fn_main: impl FnOnce(super::SysHandle) + Send + 'static) {
                 Some("./shaders/vert.glsl"),
                 Some("./shaders/retro.glsl"),
             )),
+            scene_textures: Vec::new(),
             loaded_textures: HashMap::new(),
             pallete: Pallete::basic(),
             render_texture: Some(text),

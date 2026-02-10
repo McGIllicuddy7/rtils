@@ -18,43 +18,60 @@ uniform vec4 colDiffuse;
 out vec4 finalColor;
 
 // Input lighting values
-uniform vec3 lightDir;
-uniform vec4 lightColor;
+uniform vec3 lightDir[10];
+uniform vec4 lightColor[10];
+uniform vec3 light_positions[10];
 uniform vec4 ambient;
 uniform vec3 viewPos;
 
 // Input shadowmapping values
-uniform mat4 lightVP; // Light source view-projection matrix
-uniform sampler2D shadowMap;
+uniform mat4 lightVP0; // Light source view-projection matrix
+uniform sampler2D smap0;
+uniform mat4 lightVP1; // Light source view-projection matrix
+uniform sampler2D smap1;
+uniform mat4 lightVP2; // Light source view-projection matrix
+uniform sampler2D smap2;
+uniform mat4 lightVP3; // Light source view-projection matrix
+uniform sampler2D smap3;
+uniform int light_count;
 
 uniform int shadowMapResolution;
-
-void main() {
-  finalColor = vec4(1.0, 1.0, 1.0, 1.0);
-  return;
-  // Texel color fetching from texture sampler
+vec4 light_and_shadow_calculations(int idx) {
+  vec4 out_col;
   vec4 texelColor = texture(texture0, fragTexCoord);
   vec3 lightDot = vec3(0.0);
   vec3 normal = normalize(fragNormal);
   vec3 viewD = normalize(viewPos - fragPosition);
   vec3 specular = vec3(0.0);
-
-  vec3 l = -lightDir;
+  vec3 l = -lightDir[idx];
 
   float NdotL = max(dot(normal, l), 0.0);
-  lightDot += lightColor.rgb * NdotL;
-
+  lightDot += lightColor[idx].rgb * NdotL;
+  float dist = length(fragPosition - light_positions[idx]);
   float specCo = 0.0;
-  if (NdotL > 0.0)
+  if (NdotL > 0.0) {
     specCo = pow(max(0.0, dot(viewD, reflect(-(l), normal))),
                  16.0); // 16 refers to shine
+  }
   specular += specCo;
-
-  finalColor =
-      (texelColor * ((colDiffuse + vec4(specular, 1.0)) * vec4(lightDot, 1.0)));
+  out_col = (texelColor *
+             ((colDiffuse + vec4(specular, 1.0)) * vec4(lightDot, 1.0))) /
+            dist;
+  if (idx >= 4) {
+    return out_col;
+  }
 
   // Shadow calculations
-  vec4 fragPosLightSpace = lightVP * vec4(fragPosition, 1);
+  vec4 fragPosLightSpace = vec4(0.0);
+  if (idx == 0) {
+    lightVP0 *vec4(fragPosition, 1);
+  } else if (idx == 1) {
+    lightVP1 *vec4(fragPosition, 1);
+  } else if (idx == 2) {
+    lightVP2 *vec4(fragPosition, 1);
+  } else {
+    lightVP2 *vec4(fragPosition, 1);
+  }
   fragPosLightSpace.xyz /=
       fragPosLightSpace.w; // Perform the perspective division
   fragPosLightSpace.xyz = (fragPosLightSpace.xyz + 1.0) /
@@ -77,19 +94,50 @@ void main() {
   vec2 texelSize = vec2(1.0 / float(shadowMapResolution));
   for (int x = -1; x <= 1; x++) {
     for (int y = -1; y <= 1; y++) {
-      float sampleDepth =
-          texture(shadowMap, sampleCoords + texelSize * vec2(x, y)).r;
-      if (curDepth - bias > sampleDepth)
-        shadowCounter++;
+      if (idx == 0) {
+        float sampleDepth =
+            texture(smap0, sampleCoords + texelSize * vec2(x, y)).r;
+        if (curDepth - bias > sampleDepth)
+          shadowCounter++;
+      } else if (idx == 1) {
+        float sampleDepth =
+            texture(smap1, sampleCoords + texelSize * vec2(x, y)).r;
+        if (curDepth - bias > sampleDepth)
+          shadowCounter++;
+      } else if (idx == 2) {
+        float sampleDepth =
+            texture(smap2, sampleCoords + texelSize * vec2(x, y)).r;
+        if (curDepth - bias > sampleDepth)
+          shadowCounter++;
+      } else {
+        float sampleDepth =
+            texture(smap3, sampleCoords + texelSize * vec2(x, y)).r;
+        if (curDepth - bias > sampleDepth)
+          shadowCounter++;
+      }
     }
   }
-  finalColor = mix(finalColor, vec4(0, 0, 0, 1),
-                   float(shadowCounter) / float(numSamples));
+  out_col =
+      mix(out_col, vec4(0, 0, 0, 1), float(shadowCounter) / float(numSamples));
+  return out_col;
+}
+void main() {
+
+  // Texel color fetching from texture sampler
+  vec4 texelColor = texture(texture0, fragTexCoord);
 
   // Add ambient lighting whether in shadow or not
+  int lc = light_count;
+  if (lc >= 10) {
+    lc = 9;
+  }
+  vec4 col = vec4(0.0, 0.0, 0.0, 1.0);
+  for (int i = 0; i < lc; i++) {
+    col += light_and_shadow_calculations(i);
+  }
+  col /= float(lc);
+  finalColor = col;
   finalColor += texelColor * (ambient / 10.0) * colDiffuse;
-
   // Gamma correction
   finalColor = pow(finalColor, vec4(1.0 / 2.2));
-  finalColor = vec4(1.0, 1.0, 1.0, 1.0);
 }

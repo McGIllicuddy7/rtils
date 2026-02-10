@@ -1,12 +1,14 @@
 use raylib::camera::Camera3D;
-use raylib::ffi::RenderTexture2D;
-use raylib::math::{BoundingBox, Quaternion};
-use raylib::models::{Model, RaylibModel};
+use raylib::math::{BoundingBox, Matrix, Quaternion, Vector4};
+use raylib::models::{Model, RaylibMesh, RaylibModel};
 pub use raylib::prelude::{Color, Vector3};
-use raylib::prelude::{RaylibDraw, RaylibDraw3D, RaylibMode3DExt};
-use raylib::shaders::Shader;
+use raylib::prelude::{RaylibDraw, RaylibDraw3D, RaylibMode3DExt, RaylibTextureModeExt};
+use raylib::shaders::{RaylibShader, Shader};
+use raylib::texture::RenderTexture2D;
+use raylib::{RaylibHandle, RaylibThread};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::os::unix::thread;
 use std::sync::Arc;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GObject {
@@ -146,34 +148,122 @@ impl Scene {
 
 pub struct SceneRenderer {
     pub loaded_meshes: HashMap<Arc<str>, Model>,
-    pub shadow_map_texture: Vec<RenderTexture2D>,
+    pub shadow_map_textures: Vec<RenderTexture2D>,
     pub to_load: HashSet<Arc<str>>,
     pub shader: Option<Shader>,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub should_draw: bool,
 }
 impl SceneRenderer {
     pub fn new() -> Self {
         Self {
             loaded_meshes: HashMap::new(),
-            shadow_map_texture: Vec::new(),
+            shadow_map_textures: Vec::new(),
             to_load: HashSet::new(),
             shader: None,
+            x: 0,
+            y: 0,
+            w: 1200,
+            h: 900,
+            should_draw: false,
         }
     }
-
-    pub fn render(
+    pub fn render_scene(
         &mut self,
         scene: &Scene,
-        handle: &mut impl RaylibDraw,
-        _thread: &raylib::prelude::RaylibThread,
+        handle: &mut RaylibHandle,
+        thread: &RaylibThread,
+        projections: &[Matrix],
+        target: &mut RenderTexture2D,
     ) {
+        let mut handle = handle.begin_texture_mode(thread, target);
         handle.clear_background(Color::BLACK);
+        let shade = self.shader.as_mut().unwrap();
+        let mat_locks = [
+            shade.get_shader_location("lightVP0"),
+            shade.get_shader_location("lightVP1"),
+            shade.get_shader_location("lightVP2"),
+            shade.get_shader_location("lightVP3"),
+        ];
+        let count_lock = shade.get_shader_location("light_count");
+        let col_lock = shade.get_shader_location("ambient");
+        let map_locks = [
+            shade.get_shader_location("smap0"),
+            shade.get_shader_location("smap1"),
+            shade.get_shader_location("smap2"),
+            shade.get_shader_location("smap3"),
+        ];
+        let dir_locks = shade.get_shader_location("lightDir");
+        let light_col_locks = shade.get_shader_location("lightColor");
+        let view_pos_lock = shade.get_shader_location("viewPos");
+        let pos_locks = shade.get_shader_location("light_positions");
+        let mut dirs = [Vector3::zero(); 10];
+        let mut cols = [Vector4::new(0.0, 0.0, 0.0, 0.0); 10];
+        let mut poses = [Vector3::zero(); 10];
+        shade.set_shader_value(view_pos_lock, scene.cam_pos);
+        for (i, l) in scene.lights.iter().enumerate() {
+            if i >= 10 {
+                break;
+            }
+            dirs[i] = l.1.direction;
+            cols[i].z = l.1.color.r as f32 / 256.;
+            cols[i].y = l.1.color.g as f32 / 256.;
+            cols[i].x = l.1.color.b as f32 / 256.;
+            cols[i].w = l.1.color.a as f32 / 256.;
+            poses[i] = l.1.pos;
+        }
+        shade.set_shader_value_v(light_col_locks, &cols);
+        shade.set_shader_value_v(dir_locks, &dirs);
+        shade.set_shader_value_v(pos_locks, &poses);
         let cam = Camera3D::perspective(
             scene.cam_pos,
             Vector3::forward().transform_with(scene.cam_rot.to_matrix()),
             Vector3::up().transform_with(scene.cam_rot.to_matrix()),
             90.0,
         );
+        shade.set_shader_value(count_lock, scene.lights.len() as i32);
+        shade.set_shader_value(col_lock, Vector4::new(1.0, 1.0, 1.0, 1.0));
         let mut draw = handle.begin_mode3D(cam);
+        for i in 0..projections.len() {
+            shade.set_shader_value_matrix(mat_locks[i], projections[i]);
+        }
+        for i in 0..projections.len() {
+            shade.set_shader_value_texture(map_locks[i], &self.shadow_map_textures[i]);
+        }
+        let mut to_load = HashSet::new();
+        for (_, obj) in &scene.objects {
+            if !self.loaded_meshes.contains_key(&obj.model_name) {
+                to_load.insert(obj.model_name.clone());
+                continue;
+            }
+            let mesh = self.loaded_meshes.get_mut(&obj.model_name).unwrap();
+            mesh.transform = obj.rotation.to_matrix().into();
+            draw.draw_model(mesh, obj.position, 1.0, Color::WHITE);
+        }
+        self.to_load = to_load;
+    }
+
+    pub fn render_shadows(
+        &mut self,
+        scene: &Scene,
+        handle: &mut RaylibHandle,
+        thread: &RaylibThread,
+        idx: usize,
+    ) -> Matrix {
+        let mut draw = handle.begin_texture_mode(thread, &mut self.shadow_map_textures[idx]);
+        draw.clear_background(Color::BLACK);
+        let cam = Camera3D::perspective(
+            scene.cam_pos,
+            Vector3::forward().transform_with(scene.cam_rot.to_matrix()),
+            Vector3::up().transform_with(scene.cam_rot.to_matrix()),
+            90.0,
+        );
+        let mut draw = draw.begin_mode3D(cam);
+        let view = unsafe { Matrix::from(raylib::ffi::rlGetMatrixModelview()) };
+        let proj = unsafe { Matrix::from(raylib::ffi::rlGetMatrixProjection()) };
         unsafe {
             raylib::ffi::rlSetClipPlanes(0.01, 1000.0);
         }
@@ -185,20 +275,62 @@ impl SceneRenderer {
             }
             let mesh = self.loaded_meshes.get_mut(&obj.model_name).unwrap();
             mesh.transform = obj.rotation.to_matrix().into();
-            /*  let bx = BoundingBox {
-                min: Vector3 {
-                    x: -1.,
-                    y: -1.,
-                    z: -1.,
-                },
-                max: Vector3 {
-                    x: 1.,
-                    y: 1.,
-                    z: 1.,
-                },
-            };*/
             draw.draw_model(mesh, obj.position, 1.0, Color::WHITE);
         }
         self.to_load = to_load;
+        view * proj
+    }
+
+    pub fn render(
+        &mut self,
+        scene: &Scene,
+        handle: &mut RaylibHandle,
+        thread: &raylib::prelude::RaylibThread,
+        target: &mut RenderTexture2D,
+    ) {
+        if self.shader.is_none() {
+            self.shader = Some(handle.load_shader(
+                thread,
+                Some("shaders/shadow_map_vert.glsl"),
+                Some("shaders/shadowmap_frag.glsl"),
+            ));
+            let msh = unsafe {
+                let mut msh = handle
+                    .load_model_from_mesh(
+                        thread,
+                        raylib::models::Mesh::gen_mesh_cube(thread, 1.0, 1.0, 1.0).make_weak(),
+                    )
+                    .unwrap();
+                (*msh.materials).shader = *self.shader.as_deref().unwrap();
+                println!("{:#?}", msh.get_model_bounding_box());
+                msh
+            };
+            self.loaded_meshes.insert("box".into(), msh);
+        }
+        if self.shadow_map_textures.len() < scene.lights.len() {
+            for _ in self.shadow_map_textures.len()..scene.lights.len() {
+                self.shadow_map_textures
+                    .push(handle.load_render_texture(thread, 1200, 900).unwrap());
+            }
+        }
+        let mut list = Vec::new();
+        for i in 0..scene.lights.len() {
+            list.push(self.render_shadows(scene, handle, thread, i));
+        }
+        self.render_scene(scene, handle, thread, &list, target);
+        self.to_load.remove("box");
+        for i in &self.to_load {
+            let name = "models/".to_string() + &i;
+            let Ok(modl) = handle.load_model(thread, &name) else {
+                continue;
+            };
+            for i in 0..modl.materialCount {
+                unsafe {
+                    (*modl.materials.add(i as usize)).shader = *self.shader.as_deref().unwrap();
+                }
+            }
+            self.loaded_meshes.insert(i.clone(), modl);
+        }
+        self.to_load.clear();
     }
 }

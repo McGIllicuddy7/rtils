@@ -11,10 +11,10 @@ fn main() {
 fn main_func(mut handle: SysHandle) {
     let mut scene = Scene::new();
     let light_id = scene.create_light(GLight {
-        pos: Vector3::forward(),
+        pos: Vector3::zero() - 2.0,
         color: Color::WHITE,
         direction: -Vector3::forward(),
-        fov: 90.0,
+        fov: 110.0,
         casts_shadows: true,
     });
     let mesh_id = scene.create_object(GObject {
