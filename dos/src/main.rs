@@ -11,10 +11,10 @@ fn main() {
 fn main_func(mut handle: SysHandle) {
     let mut scene = Scene::new();
     let light_id = scene.create_light(GLight {
-        pos: Vector3::zero() - 2.0,
+        pos: Vector3::new(1.0, 0.0, 0.0),
         color: Color::WHITE,
         direction: -Vector3::forward(),
-        fov: 110.0,
+        fov: 90.0,
         casts_shadows: true,
     });
     let mesh_id = scene.create_object(GObject {
@@ -64,7 +64,7 @@ fn main_func(mut handle: SysHandle) {
                 h: 900,
             },
         );
-
+        scene.camera_input(&handle);
         handle.end_drawing();
     }
 }

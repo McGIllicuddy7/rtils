@@ -44,10 +44,13 @@ vec4 light_and_shadow_calculations(int idx) {
   vec3 viewD = normalize(viewPos - fragPosition);
   vec3 specular = vec3(0.0);
   vec3 l = -lightDir[idx];
-
   float NdotL = max(dot(normal, l), 0.0);
   lightDot += lightColor[idx].rgb * NdotL;
   float dist = length(fragPosition - light_positions[idx]);
+  if (dist < 0.1) {
+    dist = 0.1;
+  }
+  dist /= 10.0;
   float specCo = 0.0;
   if (NdotL > 0.0) {
     specCo = pow(max(0.0, dot(viewD, reflect(-(l), normal))),
@@ -56,7 +59,7 @@ vec4 light_and_shadow_calculations(int idx) {
   specular += specCo;
   out_col = (texelColor *
              ((colDiffuse + vec4(specular, 1.0)) * vec4(lightDot, 1.0))) /
-            dist;
+            (dist * dist);
   if (idx >= 4) {
     return out_col;
   }
@@ -64,13 +67,13 @@ vec4 light_and_shadow_calculations(int idx) {
   // Shadow calculations
   vec4 fragPosLightSpace = vec4(0.0);
   if (idx == 0) {
-    lightVP0 *vec4(fragPosition, 1);
+    fragPosLightSpace = lightVP0 * vec4(fragPosition, 1);
   } else if (idx == 1) {
-    lightVP1 *vec4(fragPosition, 1);
+    fragPosLightSpace = lightVP1 * vec4(fragPosition, 1);
   } else if (idx == 2) {
-    lightVP2 *vec4(fragPosition, 1);
+    fragPosLightSpace = lightVP2 * vec4(fragPosition, 1);
   } else {
-    lightVP2 *vec4(fragPosition, 1);
+    fragPosLightSpace = lightVP3 * vec4(fragPosition, 1);
   }
   fragPosLightSpace.xyz /=
       fragPosLightSpace.w; // Perform the perspective division

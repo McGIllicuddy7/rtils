@@ -1,4 +1,5 @@
 use raylib::camera::Camera3D;
+use raylib::ffi::KeyboardKey;
 use raylib::math::{BoundingBox, Matrix, Quaternion, Vector4};
 use raylib::models::{Model, RaylibMesh, RaylibModel};
 pub use raylib::prelude::{Color, Vector3};
@@ -10,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::os::unix::thread;
 use std::sync::Arc;
+
+use crate::SysHandle;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GObject {
     pub model_name: Arc<str>,
@@ -144,6 +147,35 @@ impl Scene {
     pub fn get_light_mut(&mut self, id: GLightId) -> Option<&mut GLight> {
         self.lights.get_mut(&id)
     }
+
+    pub fn camera_input(&mut self, handle: &SysHandle) {
+        if handle.is_key_down(KeyboardKey::KEY_Q) {
+            self.cam_rot = Quaternion::from_euler(0.0, -0.01, 0.0) * self.cam_rot;
+        }
+        if handle.is_key_down(KeyboardKey::KEY_E) {
+            self.cam_rot = Quaternion::from_euler(0.0, 0.01, 0.0) * self.cam_rot;
+        }
+        if handle.is_key_down(KeyboardKey::KEY_R) {
+            self.cam_rot = Quaternion::from_euler(0.01, 0.00, 0.0) * self.cam_rot;
+        }
+        if handle.is_key_down(KeyboardKey::KEY_F) {
+            self.cam_rot = Quaternion::from_euler(-0.01, 0.0, 0.0) * self.cam_rot;
+        }
+        let forward = Vector3::forward().transform_with(self.cam_rot.to_matrix());
+        let right = Vector3::right().transform_with(self.cam_rot.to_matrix());
+        if handle.is_key_down(KeyboardKey::KEY_W) {
+            self.cam_pos += forward / 30.0;
+        }
+        if handle.is_key_down(KeyboardKey::KEY_S) {
+            self.cam_pos -= forward / 30.0;
+        }
+        if handle.is_key_down(KeyboardKey::KEY_D) {
+            self.cam_pos += right / 30.0;
+        }
+        if handle.is_key_down(KeyboardKey::KEY_A) {
+            self.cam_pos -= right / 30.0;
+        }
+    }
 }
 
 pub struct SceneRenderer {
@@ -200,6 +232,8 @@ impl SceneRenderer {
         let light_col_locks = shade.get_shader_location("lightColor");
         let view_pos_lock = shade.get_shader_location("viewPos");
         let pos_locks = shade.get_shader_location("light_positions");
+        let res_loc = shade.get_shader_location("shadowMapResulotion");
+        shade.set_shader_value(res_loc, 600);
         let mut dirs = [Vector3::zero(); 10];
         let mut cols = [Vector4::new(0.0, 0.0, 0.0, 0.0); 10];
         let mut poses = [Vector3::zero(); 10];
@@ -209,10 +243,10 @@ impl SceneRenderer {
                 break;
             }
             dirs[i] = l.1.direction;
-            cols[i].z = l.1.color.r as f32 / 256.;
-            cols[i].y = l.1.color.g as f32 / 256.;
-            cols[i].x = l.1.color.b as f32 / 256.;
-            cols[i].w = l.1.color.a as f32 / 256.;
+            cols[i].x = l.1.color.r as f32 / 255.;
+            cols[i].y = l.1.color.g as f32 / 255.;
+            cols[i].z = l.1.color.b as f32 / 255.;
+            cols[i].w = l.1.color.a as f32 / 255.;
             poses[i] = l.1.pos;
         }
         shade.set_shader_value_v(light_col_locks, &cols);
@@ -278,7 +312,7 @@ impl SceneRenderer {
             draw.draw_model(mesh, obj.position, 1.0, Color::WHITE);
         }
         self.to_load = to_load;
-        view * proj
+        proj * view
     }
 
     pub fn render(
@@ -310,7 +344,7 @@ impl SceneRenderer {
         if self.shadow_map_textures.len() < scene.lights.len() {
             for _ in self.shadow_map_textures.len()..scene.lights.len() {
                 self.shadow_map_textures
-                    .push(handle.load_render_texture(thread, 1200, 900).unwrap());
+                    .push(handle.load_render_texture(thread, 600, 600).unwrap());
             }
         }
         let mut list = Vec::new();
