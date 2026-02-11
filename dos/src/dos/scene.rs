@@ -25,6 +25,7 @@ pub struct GLight {
     pub pos: Vector3,
     pub color: Color,
     pub direction: Vector3,
+    pub up: Vector3,
     pub fov: f32,
     pub casts_shadows: bool,
 }
@@ -170,10 +171,10 @@ impl Scene {
             self.cam_pos -= forward / 30.0;
         }
         if handle.is_key_down(KeyboardKey::KEY_D) {
-            self.cam_pos += right / 30.0;
+            self.cam_pos -= right / 30.0;
         }
         if handle.is_key_down(KeyboardKey::KEY_A) {
-            self.cam_pos -= right / 30.0;
+            self.cam_pos += right / 30.0;
         }
     }
 }
@@ -230,14 +231,16 @@ impl SceneRenderer {
         ];
         let dir_locks = shade.get_shader_location("lightDir");
         let light_col_locks = shade.get_shader_location("lightColor");
-        let view_pos_lock = shade.get_shader_location("viewPos");
-        let pos_locks = shade.get_shader_location("light_positions");
-        let res_loc = shade.get_shader_location("shadowMapResulotion");
-        shade.set_shader_value(res_loc, 600);
+        let pos_locks = shade.get_shader_location("viewPos");
+        let res_loc = shade.get_shader_location("shadowMapResolution");
+        let cam_loc = shade.get_shader_location("cam_pos");
+        shade.set_shader_value(cam_loc, scene.cam_pos);
+        let fov_loc = shade.get_shader_location("fovs");
+        shade.set_shader_value(res_loc, 1024);
         let mut dirs = [Vector3::zero(); 10];
         let mut cols = [Vector4::new(0.0, 0.0, 0.0, 0.0); 10];
         let mut poses = [Vector3::zero(); 10];
-        shade.set_shader_value(view_pos_lock, scene.cam_pos);
+        let mut fovs = [0.0; 10];
         for (i, l) in scene.lights.iter().enumerate() {
             if i >= 10 {
                 break;
@@ -248,24 +251,41 @@ impl SceneRenderer {
             cols[i].z = l.1.color.b as f32 / 255.;
             cols[i].w = l.1.color.a as f32 / 255.;
             poses[i] = l.1.pos;
+            fovs[i] = l.1.fov;
         }
         shade.set_shader_value_v(light_col_locks, &cols);
         shade.set_shader_value_v(dir_locks, &dirs);
         shade.set_shader_value_v(pos_locks, &poses);
+        shade.set_shader_value_v(fov_loc, &fovs);
         let cam = Camera3D::perspective(
             scene.cam_pos,
-            Vector3::forward().transform_with(scene.cam_rot.to_matrix()),
+            Vector3::forward().transform_with(scene.cam_rot.to_matrix()) + scene.cam_pos,
             Vector3::up().transform_with(scene.cam_rot.to_matrix()),
             90.0,
         );
         shade.set_shader_value(count_lock, scene.lights.len() as i32);
         shade.set_shader_value(col_lock, Vector4::new(1.0, 1.0, 1.0, 1.0));
+        let depth_lock = shade.get_shader_location("depth");
+        shade.set_shader_value(depth_lock, 0);
         let mut draw = handle.begin_mode3D(cam);
+        unsafe {
+            raylib::ffi::rlSetClipPlanes(0.01, 1000.0);
+        }
         for i in 0..projections.len() {
             shade.set_shader_value_matrix(mat_locks[i], projections[i]);
         }
         for i in 0..projections.len() {
-            shade.set_shader_value_texture(map_locks[i], &self.shadow_map_textures[i]);
+            //  shade.set_shader_value_texture(map_locks[i], &self.shadow_map_textures[i]);
+            unsafe {
+                raylib::ffi::rlActiveTextureSlot(10 + i as i32);
+                raylib::ffi::rlEnableTexture(self.shadow_map_textures[i].depth.id);
+                raylib::ffi::rlSetUniform(
+                    map_locks[i],
+                    &(10 + i) as *const _ as *const _,
+                    raylib::ffi::ShaderUniformDataType::SHADER_UNIFORM_INT as i32,
+                    1,
+                );
+            }
         }
         let mut to_load = HashSet::new();
         for (_, obj) in &scene.objects {
@@ -285,15 +305,16 @@ impl SceneRenderer {
         scene: &Scene,
         handle: &mut RaylibHandle,
         thread: &RaylibThread,
-        idx: usize,
+        idx: GLightId,
+        count: usize,
     ) -> Matrix {
-        let mut draw = handle.begin_texture_mode(thread, &mut self.shadow_map_textures[idx]);
-        draw.clear_background(Color::BLACK);
+        let mut draw = handle.begin_texture_mode(thread, &mut self.shadow_map_textures[count]);
+        draw.clear_background(Color::WHITE);
         let cam = Camera3D::perspective(
-            scene.cam_pos,
-            Vector3::forward().transform_with(scene.cam_rot.to_matrix()),
-            Vector3::up().transform_with(scene.cam_rot.to_matrix()),
-            90.0,
+            scene.lights[&idx].pos,
+            scene.lights[&idx].direction + scene.lights[&idx].pos,
+            scene.lights[&idx].up,
+            110.0,
         );
         let mut draw = draw.begin_mode3D(cam);
         let view = unsafe { Matrix::from(raylib::ffi::rlGetMatrixModelview()) };
@@ -301,6 +322,11 @@ impl SceneRenderer {
         unsafe {
             raylib::ffi::rlSetClipPlanes(0.01, 1000.0);
         }
+        let shade = self.shader.as_mut().unwrap();
+        let depth_lock = shade.get_shader_location("depth");
+        let cam_lock = shade.get_shader_location("cam_lock");
+        shade.set_shader_value(depth_lock, 1);
+        shade.set_shader_value(cam_lock, cam.position);
         let mut to_load = HashSet::new();
         for (_, obj) in &scene.objects {
             if !self.loaded_meshes.contains_key(&obj.model_name) {
@@ -344,12 +370,13 @@ impl SceneRenderer {
         if self.shadow_map_textures.len() < scene.lights.len() {
             for _ in self.shadow_map_textures.len()..scene.lights.len() {
                 self.shadow_map_textures
-                    .push(handle.load_render_texture(thread, 600, 600).unwrap());
+                    .push(handle.load_render_texture(thread, 1024, 1024).unwrap());
             }
         }
         let mut list = Vec::new();
-        for i in 0..scene.lights.len() {
-            list.push(self.render_shadows(scene, handle, thread, i));
+        let indes: Vec<GLightId> = scene.lights.iter().map(|(x, _)| *x).collect();
+        for (count, idx) in indes.iter().enumerate() {
+            list.push(self.render_shadows(scene, handle, thread, *idx, count));
         }
         self.render_scene(scene, handle, thread, &list, target);
         self.to_load.remove("box");

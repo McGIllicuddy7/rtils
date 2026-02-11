@@ -11,15 +11,16 @@ fn main() {
 fn main_func(mut handle: SysHandle) {
     let mut scene = Scene::new();
     let light_id = scene.create_light(GLight {
-        pos: Vector3::new(1.0, 0.0, 0.0),
+        pos: -Vector3::forward(),
         color: Color::WHITE,
-        direction: -Vector3::forward(),
+        direction: Vector3::forward(),
+        up: Vector3::up(),
         fov: 90.0,
         casts_shadows: true,
     });
     let mesh_id = scene.create_object(GObject {
         model_name: "box".into(),
-        position: Vector3::forward() * 10.0,
+        position: Vector3::forward() * 15.0,
         rotation: Quaternion::identity(),
     });
     for i in -2..=2 {
