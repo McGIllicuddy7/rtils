@@ -273,7 +273,22 @@ pub fn run_draw_cmd<T>(
         Cmd::BeginDrawing => {
             draw.clear_background(Color::BLACK);
         }
-        Cmd::EndDrawing => {}
+        Cmd::EndDrawing { time_stamp } => {
+            draw.draw_text(
+                &format!(
+                    "{} millisecond delay",
+                    std::time::UNIX_EPOCH
+                        .elapsed()
+                        .unwrap()
+                        .as_millis()
+                        .abs_diff(time_stamp)
+                ),
+                10,
+                400,
+                10,
+                Color::WHITE,
+            );
+        }
         Cmd::Update(_) => {}
     }
     false
@@ -385,6 +400,7 @@ impl Device {
         &mut self,
         cache: &mut HashMap<CachedTexture, RenderTexture2D>,
         idx: u64,
+        updated: &mut bool,
     ) {
         let input = input::generate_input(&mut self.handle, 2.0, 2.0);
         if self.active_process != idx {
@@ -395,12 +411,6 @@ impl Device {
             pressed_key: self.handle.get_char_pressed(),
             should_close: self.handle.window_should_close(),
         };
-        self.processes
-            .get_mut(&idx)
-            .unwrap()
-            .handle
-            .send(Cmd::Update(inp))
-            .unwrap();
         let mut should_draw = false;
         let mut cmds = Vec::new();
         for n in self.processes.get_mut(&idx).unwrap().handle.by_ref() {
@@ -408,9 +418,13 @@ impl Device {
                 break;
             }
             let tmp = n.unwrap();
-            if tmp == Cmd::EndDrawing {
-                should_draw = true;
-                break;
+            match tmp {
+                Cmd::EndDrawing { time_stamp: _ } => {
+                    should_draw = true;
+                    cmds.push(tmp);
+                    break;
+                }
+                _ => {}
             }
             cmds.push(tmp);
         }
@@ -419,6 +433,14 @@ impl Device {
         }
         {
             if should_draw {
+                self.processes
+                    .get_mut(&idx)
+                    .unwrap()
+                    .handle
+                    .send(Cmd::Update(inp))
+                    .unwrap();
+
+                *updated = true;
                 draw_loop(
                     self.processes.get(&idx).unwrap().cmds.clone(),
                     &mut self.handle,
@@ -434,7 +456,7 @@ impl Device {
             self.processes.get_mut(&idx).unwrap().cmds.clear();
         }
     }
-    pub fn run_loop(&mut self) {
+    pub fn run_loop(mut self) {
         let mut scanline_idx = 0.0;
         let mut shader = self.handle.load_shader(
             &self.thread,
@@ -500,55 +522,61 @@ impl Device {
                         }
                     }
                 }
+                let mut updated = false;
                 let procs: Vec<u64> = self.processes.iter().map(|(i, _)| *i).collect();
                 for i in procs {
-                    self.update_process(&mut cache, i);
+                    self.update_process(&mut cache, i, &mut updated);
                 }
-                let mut draw = self.handle.begin_drawing(&self.thread);
-                draw.clear_background(Color::BLACK);
-                shader.set_shader_value(scanline, scanline_idx);
-                scanline_idx += 0.001;
-                if scanline_idx > 1.0 {
-                    scanline_idx = 0.0;
-                }
-                draw.draw_shader_mode(&mut shader, |mut draw| {
-                    for (idx, i) in &self.processes {
-                        if *idx != self.active_process {
-                            continue;
-                        }
-                        let fb = i.target.texture();
+                if updated {
+                    let mut draw = self.handle.begin_drawing(&self.thread);
+                    draw.clear_background(Color::BLACK);
+                    shader.set_shader_value(scanline, scanline_idx);
+                    scanline_idx += 0.001;
+                    if scanline_idx > 1.0 {
+                        scanline_idx = 0.0;
+                    }
+                    draw.draw_shader_mode(&mut shader, |mut draw| {
+                        for (idx, i) in &self.processes {
+                            if *idx != self.active_process {
+                                continue;
+                            }
+                            let fb = i.target.texture();
 
-                        draw.draw_texture_pro(
-                            fb,
-                            Rectangle::new(
-                                0 as f32,
-                                0 as f32,
-                                SCREEN_WIDTH as f32,
-                                -SCREEN_HEIGHT as f32,
-                            ),
-                            Rectangle::new(
-                                0 as f32,
-                                0 as f32,
-                                SCREEN_WIDTH as f32 * 2. * i.scale,
-                                SCREEN_HEIGHT as f32 * 2. * i.scale,
-                            ),
-                            Vector2::new(i.x as f32, i.y as f32),
-                            0.0,
-                            Color::WHITE,
-                        );
+                            draw.draw_texture_pro(
+                                fb,
+                                Rectangle::new(
+                                    0 as f32,
+                                    0 as f32,
+                                    SCREEN_WIDTH as f32,
+                                    -SCREEN_HEIGHT as f32,
+                                ),
+                                Rectangle::new(
+                                    0 as f32,
+                                    0 as f32,
+                                    SCREEN_WIDTH as f32 * 2. * i.scale,
+                                    SCREEN_HEIGHT as f32 * 2. * i.scale,
+                                ),
+                                Vector2::new(i.x as f32, i.y as f32),
+                                0.0,
+                                Color::WHITE,
+                            );
+                        }
+                    });
+                    draw.draw_fps(10, 10);
+                    drop(draw);
+                    if idx > 200 {
+                        if !self.handle.is_window_fullscreen() {
+                            //      self.handle.toggle_fullscreen();
+                        }
+                    } else {
+                        idx += 1;
                     }
-                });
-                draw.draw_fps(10, 10);
-                drop(draw);
-                if idx > 200 {
-                    if !self.handle.is_window_fullscreen() {
-                        //      self.handle.toggle_fullscreen();
-                    }
-                } else {
-                    idx += 1;
                 }
             }
         }
+        self.processes.clear();
+        drop(self.font);
+        drop(cache);
     }
     pub fn spawn_process(&mut self, proc: Process) -> u64 {
         if self.processes.len() > 10 {

@@ -46,6 +46,7 @@ struct Handle {
     queue: BStream<Cmd>,
     pressed_key: Option<char>,
     should_close: bool,
+    updated: bool,
 }
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct HandleUpdate {

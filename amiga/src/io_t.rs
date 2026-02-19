@@ -113,7 +113,9 @@ pub enum Cmd {
         h: i32,
     },
     BeginDrawing,
-    EndDrawing,
+    EndDrawing {
+        time_stamp: u128,
+    },
 }
 #[repr(i8)]
 #[derive(PartialEq, Eq, Clone, Debug, Copy, Serialize, Deserialize)]
@@ -223,6 +225,7 @@ pub fn setup() -> Option<BStream<Cmd>> {
             queue: BStream::from_stream(at),
             should_close: false,
             pressed_key: None,
+            updated: false,
         });
         None
     } else {
@@ -233,6 +236,7 @@ pub fn setup() -> Option<BStream<Cmd>> {
             queue: ix,
             should_close: false,
             pressed_key: None,
+            updated: false,
         });
         Some(out)
     }
@@ -306,24 +310,29 @@ pub fn get_pressed_key() -> Option<char> {
 
 pub fn begin_drawing() {
     let mut h = get_handle();
-    let Ok(x) = h.queue.receive_wait() else {
-        h.should_close = true;
-        return;
-    };
-    match x {
-        Cmd::Update(x) => {
-            h.input = x.input;
-            h.pressed_key = x.pressed_key;
-            h.should_close = x.should_close;
+    if h.updated {
+        let Ok(x) = h.queue.receive_wait() else {
+            h.should_close = true;
+            return;
+        };
+        match x {
+            Cmd::Update(x) => {
+                h.input = x.input;
+                h.pressed_key = x.pressed_key;
+                h.should_close = x.should_close;
+            }
+            _ => {}
         }
-        _ => {}
     }
+    h.updated = true;
     let _ = h.queue.send(Cmd::BeginDrawing);
 }
 
 pub fn end_drawing() {
     let h = get_handle();
-    let _ = h.queue.send(Cmd::EndDrawing);
+    let _ = h.queue.send(Cmd::EndDrawing {
+        time_stamp: std::time::UNIX_EPOCH.elapsed().unwrap().as_millis(),
+    });
 }
 
 pub fn should_close() -> bool {
