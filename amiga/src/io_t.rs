@@ -1090,7 +1090,7 @@ pub fn draw_scroll_box<'a>(
     end_command_buffer(cmds);
     end_scissor(x - 1, y - 1, w + 2, h + 2);
     let mut amnt = scroll_amount;
-    amnt -= get_handle().input.scroll_amount * 1. / (bounds.height - h as f32).abs();
+    amnt -= get_handle().input.scroll_amount * 1. / (bounds.height - h as f32).abs() * 5.0;
     if amnt < 0.0 {
         amnt = 0.0;
     } else if amnt > 1.0 {
@@ -1136,7 +1136,7 @@ pub fn draw_scroll_box_rev<'a>(
     end_command_buffer(cmds);
     end_scissor(x, y, w, h);
     let mut amnt = scroll_amount;
-    amnt -= get_handle().input.scroll_amount * 1. / (bounds.height - h as f32).abs();
+    amnt -= get_handle().input.scroll_amount * 1. / (bounds.height - h as f32).abs() * 5.0;
     if amnt < 0.0 {
         amnt = 0.0;
     } else if amnt > 1.0 {

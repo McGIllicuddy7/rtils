@@ -572,7 +572,7 @@ pub fn main_loop(cmd: BStream<Cmd>) {
         .load_render_texture(&thread, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
         .unwrap();
     let font = handle
-        .load_font(&thread, "Commodore Angled v1.2.TTF")
+        .load_font(&thread, "Commodore Angled v1.2.ttf")
         .unwrap();
     handle.set_exit_key(None);
     handle.set_window_focused();
